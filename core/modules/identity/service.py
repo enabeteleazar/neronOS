@@ -1,7 +1,7 @@
 from pathlib import Path
 
 
-NERON_MD_PATH = Path("/etc/neron/NERON.md")
+NERON_MD_PATH = Path("/etc/neron/memory/obsidian/identity/NERON.md")
 
 
 def _read_neron_md() -> str:
