@@ -114,6 +114,15 @@ class CoreOrchestrator:
                 requires_goal_pipeline=True,
                 requires_governor=True,
             )
+        elif _is_agent_maintenance(normalized):
+            decision = OrchestratorDecision(
+                intent="agent_update",
+                selected_route="agent_manager",
+                reason="Commande de maintenance agent détectée avant le routage timer.",
+                complexity="medium",
+                requires_agent_factory=True,
+                requires_governor=True,
+            )
         elif _is_timer_request(normalized):
             decision = OrchestratorDecision(
                 intent="timer",
@@ -451,6 +460,18 @@ class CoreOrchestrator:
                 source_channel=source_channel,
             )
             return response, "agent_build_orchestrator", {}
+
+        if route == "agent_manager":
+            self._log_used("agent_manager_used", decision)
+            response = await self.agent_router.route(
+                intent_result,
+                query,
+                source_channel=source_channel,
+            )
+            return response, "agent_manager", {
+                "resolved_intent": "agent_update",
+                "routed_before_llm": True,
+            }
 
         if route == "tool_router":
             self._log_used("tool_router_used", decision)
