@@ -12,9 +12,15 @@ from modules.capabilities.models import CapabilityRequest
 from core.pipeline.intent.intent_router import Intent, IntentResult, IntentRouter
 from core.pipeline.routing.agent_router import AgentRouter
 from core.modules.timer import detect_timer_intent, build_timer_response
-from core.modules.identity import detect_identity_intent, build_identity_response
-from core.modules.status import detect_status_intent, build_status_response
-from core.modules.memory import detect_memory_intent, build_memory_response
+from core.modules.identity import (
+    build_identity_response_async,
+    detect_identity_intent,
+)
+from core.modules.status import (
+    build_status_response_async,
+    detect_status_intent,
+)
+from core.modules.memory import detect_memory_intent, build_memory_response_async
 
 logger = get_logger("core.pipeline.orchestrator")
 
@@ -131,7 +137,7 @@ class CoreOrchestrator:
                 complexity="simple",
                 requires_timer=True,
             )
-        elif status_result.get("matched"):
+        elif status_result.get("matched") or intent == Intent.SYSTEM_STATUS:
             decision = OrchestratorDecision(
                 intent="status_query",
                 selected_route="status_provider",
@@ -381,11 +387,11 @@ class CoreOrchestrator:
 
         if route == "status_provider":
             self._log_used("status_used", decision)
-            return self._execute_status(query, decision)
+            return await self._execute_status(query, decision)
 
         if route == "identity_provider":
             self._log_used("identity_used", decision)
-            return self._execute_identity(query, decision)
+            return await self._execute_identity(query, decision)
 
         if route == "memory_engine":
             self._log_used("memory_used", decision)
@@ -497,14 +503,15 @@ class CoreOrchestrator:
         )
         return response, "llm_agent", {}
 
-    def _execute_status(
+    async def _execute_status(
         self,
         query: str,
         decision: OrchestratorDecision,
     ) -> tuple[str, str, dict[str, Any]]:
         status_result = detect_status_intent(query)
         kind = status_result.get("kind") or "core_status"
-        result = build_status_response(kind)
+        result = await build_status_response_async(kind, question=query)
+        normalized_kind = result.get("status_kind") or kind
 
         metadata = {
             "selected_route": "status_provider",
@@ -512,22 +519,22 @@ class CoreOrchestrator:
             "fallback_used": False,
             "retries": 0,
             "source": result.get("source"),
-            "status_kind": kind,
+            "status_kind": normalized_kind,
             "status_confidence": status_result.get("confidence"),
+            "status_llm_used": result.get("llm_used", False),
             "status": result.get("status"),
         }
 
         return result["response"], result["agent"], metadata
 
-    def _execute_identity(
+    async def _execute_identity(
         self,
         query: str,
         decision: OrchestratorDecision,
     ) -> tuple[str, str, dict[str, Any]]:
         identity_result = detect_identity_intent(query)
-        status_result = detect_status_intent(query)
         kind = identity_result.get("kind") or "identity"
-        result = build_identity_response(kind)
+        result = await build_identity_response_async(kind, question=query)
 
         metadata = {
             "selected_route": "identity_provider",
@@ -535,8 +542,10 @@ class CoreOrchestrator:
             "fallback_used": False,
             "retries": 0,
             "source": result.get("source"),
+            "identity_source": result.get("source"),
             "identity_kind": kind,
             "identity_confidence": identity_result.get("confidence"),
+            "identity_llm_used": result.get("llm_used", False),
         }
 
         return result["response"], result["agent"], metadata
@@ -569,7 +578,7 @@ class CoreOrchestrator:
     ) -> tuple[str, str, dict[str, Any]]:
         memory_result = detect_memory_intent(query)
         kind = memory_result.get("kind") or "recall"
-        result = build_memory_response(kind, query)
+        result = await build_memory_response_async(kind, query)
 
         metadata = {
             "selected_route": "memory_engine",
@@ -578,7 +587,9 @@ class CoreOrchestrator:
             "retries": 0,
             "source": result.get("source"),
             "memory_kind": kind,
+            "memory_response_mode": result.get("memory_response_mode"),
             "memory_confidence": memory_result.get("confidence"),
+            "memory_llm_used": result.get("memory_llm_used", False),
         }
 
         if "memory" in result:
@@ -586,6 +597,9 @@ class CoreOrchestrator:
 
         if "memories" in result:
             metadata["memories"] = result["memories"]
+
+        if "oblivia_memories" in result:
+            metadata["oblivia_memories"] = result["oblivia_memories"]
 
         return result["response"], result["agent"], metadata
 

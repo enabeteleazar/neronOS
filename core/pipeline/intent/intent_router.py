@@ -71,6 +71,7 @@ def _normalize(text: str) -> str:
     for char in ["?", "!", ".", ",", ";", ":"]:
         n = n.replace(char, " ")
 
+    n = n.replace("-", " ")
     n = n.replace("'", " ").replace("’", " ").replace("`", " ")
 
     return " ".join(n.split())
@@ -153,8 +154,20 @@ def _fallback_intent(query: str) -> Intent | None:
         "statut systeme",
         "etat systeme",
         "status systeme",
+        "quel est ton etat actuel",
+        "comment va ton systeme",
+        "ton systeme fonctionne t il correctement",
+        "systeme fonctionne t il correctement",
+        "le core fonctionne t il",
+        "core fonctionne t il",
+        "as tu detecte des problemes",
         "services actifs",
+        "quels services sont actifs",
         "liste les services",
+        "quels modules sont charges",
+        "quels modules sont disponibles",
+        "modules charges",
+        "modules disponibles",
     ]
 
     network_keywords = [
@@ -190,6 +203,14 @@ def _fallback_intent(query: str) -> Intent | None:
     ]
 
     project_status_keywords = [
+        "ou en est mon objectif",
+        "où en est mon objectif",
+        "etat de mon objectif",
+        "état de mon objectif",
+        "statut de mon objectif",
+        "status de mon objectif",
+        "ou en est l objectif",
+        "où en est l objectif",
         "ou en est le projet",
         "où en est le projet",
         "il en est ou l agent",
@@ -358,8 +379,14 @@ def _fallback_intent(query: str) -> Intent | None:
     if q in status_smalltalk_keywords:
         return Intent.STATUS_SMALLTALK
 
-    if any(k in q for k in identity_keywords):
-        return Intent.IDENTITY_QUERY
+    try:
+        from core.modules.identity import detect_identity_intent
+
+        if detect_identity_intent(query).get("matched"):
+            return Intent.IDENTITY_QUERY
+    except Exception:
+        if any(k in q for k in identity_keywords):
+            return Intent.IDENTITY_QUERY
 
     if any(k in q for k in self_status_keywords):
         return Intent.SELF_STATUS
