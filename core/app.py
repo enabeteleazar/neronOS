@@ -181,8 +181,6 @@ def _active_core_orchestrator() -> CoreOrchestrator:
     if active_agent_router is not None:
         orchestrator.agent_router = active_agent_router
     orchestrator._capability_resolver = get_capability_resolver()
-    if memory_agent is not None:
-        orchestrator._memory_engine = memory_agent
     return orchestrator
 
 
@@ -418,7 +416,6 @@ async def lifespan(app: FastAPI):
                     intent_router=router,
                     agent_router=agent_router,
                     capability_resolver=get_capability_resolver(),
-                    memory_engine=memory_agent,
                 )
             )
 
