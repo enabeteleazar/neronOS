@@ -26,6 +26,8 @@ from modules.evolution.routes import router as evolution_router
 
 from core.logging.setup import logger
 
+from core.modules.oblivia.router import router as memory_router
+
 logger.info("Booting Néron Core...")
 
 # =========================
@@ -127,7 +129,7 @@ BASE_URL = HA_CONFIG.get("url")
 TOKEN = HA_CONFIG.get("token")
 SYNC_INTERVAL = HA_CONFIG.get("sync_interval", 60)
 
-from agents.memory.obsidian_agent import ObsidianAgent
+from core.modules.oblivia import ObliviaMemoryManager
 from agents.autonomous.planner_agent import AutonomousPlannerAgent
 from core.api.planner_routes import router as planner_router
 
@@ -155,7 +157,7 @@ ha_agent:         HAAgent         | None = None
 code_agent:       CodeAgent       | None = None
 code_audit_agent: CodeAuditAgent  | None = None
 router:           IntentRouter    | None = None
-obsidian_agent:   ObsidianAgent   | None = None
+oblivia_memory:   ObliviaMemoryManager   | None = None
 autonomous_planner_agent: AutonomousPlannerAgent | None = None
 _capability_resolver: CapabilityResolver | None = None
 
@@ -361,7 +363,7 @@ async def lifespan(app: FastAPI):
         code_agent = CodeAgent()
         code_audit_agent = CodeAuditAgent()
 
-        obsidian_agent = ObsidianAgent("/etc/neron/obsidian-vault")
+        oblivia_memory = ObliviaMemoryManager()
         autonomous_planner_agent = AutonomousPlannerAgent("/etc/neron/obsidian-vault")
 
         await ha_agent.on_start()
@@ -567,6 +569,7 @@ app.include_router(critic_history_router)
 app.include_router(code_awareness_router)
 app.include_router(projects_router)
 app.include_router(evolution_router)
+app.include_router(memory_router)
 
 app.add_middleware(
     CORSMiddleware,

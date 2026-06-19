@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .schemas import MemoryRecord
+from .text_utils import normalize_text
 
 DEFAULT_VAULT = "/etc/neron/memory/obsidian"
 
@@ -41,7 +42,7 @@ class ObsidianMemoryAdapter:
 
     def search(self, query: str, limit: int = 10):
         results = []
-        needle = query.lower().strip()
+        needle = normalize_text(query)
 
         if not needle:
             return results
@@ -52,7 +53,7 @@ class ObsidianMemoryAdapter:
             except Exception:
                 continue
 
-            haystack = content.lower()
+            haystack = normalize_text(content)
             if needle not in haystack:
                 continue
 
@@ -105,8 +106,9 @@ metadata: {record.metadata}
 """
 
     def _score(self, content: str, query: str) -> float:
-        text = content.lower()
-        count = text.count(query)
+        text = normalize_text(content)
+        needle = normalize_text(query)
+        count = text.count(needle)
 
         if count <= 0:
             return 0.0
