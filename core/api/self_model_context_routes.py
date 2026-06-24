@@ -35,12 +35,11 @@ async def self_model_status() -> dict:
 @router.get("/self-model/context")
 async def self_model_context() -> dict:
     model = get_self_model()
-    task_manager = get_task_manager()
-
     model.refresh()
 
     data = model.to_dict()
     runtime = data.get("runtime", {}) or {}
+    task_manager = get_task_manager()
 
     try:
         tasks_all = task_manager.list_tasks()
@@ -72,13 +71,17 @@ async def self_model_context() -> dict:
 
     next_task = pending_tasks[0] if pending_tasks else None
 
-    task_summary = {
+    route_task_summary = {
         "total": len(tasks_all),
         "active": len(active_tasks),
         "pending": len(pending_tasks),
         "running": len(running_tasks),
         "failed": len(failed_tasks),
     }
+    task_summary = (
+        (data.get("tasks") or {}).get("summary")
+        or route_task_summary
+    )
 
     try:
         code_scan = scan_project(max_depth=1)

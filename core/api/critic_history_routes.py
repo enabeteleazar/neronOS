@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from fastapi import APIRouter
 from modules.cognitive.history import read_jsonl_tail
 
 
-CRITIC_HISTORY_PATH = Path("/etc/neron/data/critic_history.jsonl")
+CRITIC_HISTORY_PATH = Path(
+    os.getenv(
+        "NERON_CRITIC_HISTORY_PATH",
+        "/etc/neron/data/critic_history.jsonl",
+    )
+)
 
 router = APIRouter(tags=["critic-history"])
 

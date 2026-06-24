@@ -35,6 +35,7 @@ logger.info("Booting Néron Core...")
 # =========================
 
 import asyncio
+import hmac
 import json
 import os
 import time
@@ -43,9 +44,9 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import psutil
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
     REGISTRY,
@@ -548,6 +549,35 @@ app = FastAPI(
     version=VERSION,
     lifespan=lifespan,
 )
+
+PUBLIC_API_PATHS = frozenset({"/health"})
+
+
+@app.middleware("http")
+async def enforce_api_key(request: Request, call_next):
+    if request.method == "OPTIONS" or request.url.path in PUBLIC_API_PATHS:
+        return await call_next(request)
+
+    configured_key = str(settings.API_KEY or "").strip()
+    if not configured_key or configured_key == "changez_moi":
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Authentification API non configurée"},
+        )
+
+    supplied_key = request.headers.get("X-API-Key")
+    if not supplied_key:
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "API Key manquante"},
+        )
+    if not hmac.compare_digest(supplied_key, configured_key):
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "API Key invalide"},
+        )
+    return await call_next(request)
+
 
 app.include_router(self_model_router)
 app.include_router(runtime_governor_router)

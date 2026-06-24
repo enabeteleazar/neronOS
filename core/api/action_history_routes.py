@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from fastapi import APIRouter
 from modules.cognitive.history import read_jsonl_tail
 
 
-ACTION_HISTORY_PATH = Path("/etc/neron/data/action_history.jsonl")
+ACTION_HISTORY_PATH = Path(
+    os.getenv(
+        "NERON_ACTION_HISTORY_PATH",
+        "/etc/neron/data/action_history.jsonl",
+    )
+)
 
 router = APIRouter(tags=["action-history"])
 

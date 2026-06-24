@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import time
 import unicodedata
 from dataclasses import asdict, dataclass, field
@@ -89,6 +90,7 @@ class CoreOrchestrator:
         goal_execution_engine: Any | None = None,
         goal_background_runner: Any | None = None,
         runtime_governor: Any | None = None,
+        agent_runtime_factory: Any | None = None,
     ) -> None:
         self.intent_router = intent_router or IntentRouter()
         self.agent_router = agent_router or AgentRouter()
@@ -97,6 +99,7 @@ class CoreOrchestrator:
         self._goal_execution_engine = goal_execution_engine
         self._goal_background_runner = goal_background_runner
         self._runtime_governor = runtime_governor
+        self._agent_runtime_factory = agent_runtime_factory
 
     async def decide(
         self,
@@ -111,6 +114,7 @@ class CoreOrchestrator:
         timer_result = detect_timer_intent(query)
         status_result = detect_status_intent(query)
         memory_result = detect_memory_intent(query)
+        agent_invocation = _parse_agent_invocation(query)
 
         if normalized == "/help":
             decision = OrchestratorDecision(
@@ -128,6 +132,13 @@ class CoreOrchestrator:
                 requires_goal_pipeline=True,
                 requires_governor=True,
             )
+        elif agent_invocation is not None:
+            decision = OrchestratorDecision(
+                intent="agent_invocation",
+                selected_route="registered_agent_runtime",
+                reason="Invocation explicite d'un agent enregistré traitée par le Runtime.",
+                complexity="simple",
+            )
         elif _is_agent_maintenance(normalized):
             decision = OrchestratorDecision(
                 intent="agent_update",
@@ -144,6 +155,14 @@ class CoreOrchestrator:
                 reason="Demande explicite de minuteur detectee.",
                 complexity="simple",
                 requires_timer=True,
+            )
+        elif _is_self_model_request(normalized):
+            decision = OrchestratorDecision(
+                intent=Intent.SELF_STATUS.value,
+                selected_route="tool_router",
+                reason="Demande de modèle interne traitée par le SelfModel local.",
+                complexity="simple",
+                requires_tool=True,
             )
         elif status_result.get("matched") or intent == Intent.SYSTEM_STATUS:
             decision = OrchestratorDecision(
@@ -401,6 +420,10 @@ class CoreOrchestrator:
             self._log_used("help_used", decision)
             return NERON_HELP_TEXT, "help_provider", {}
 
+        if route == "registered_agent_runtime":
+            self._log_used("registered_agent_runtime_used", decision)
+            return await self._execute_registered_agent(query, request_metadata)
+
         if route == "timer_engine":
             self._log_used("timer_used", decision)
             return self._execute_timer(query, decision)
@@ -551,6 +574,69 @@ class CoreOrchestrator:
 
         return result["response"], result["agent"], metadata
 
+    async def _execute_registered_agent(
+        self,
+        query: str,
+        request_metadata: dict[str, Any],
+    ) -> tuple[str, str, dict[str, Any]]:
+        invocation = _parse_agent_invocation(query)
+        if invocation is None:
+            error = "Commande d’invocation agent invalide."
+            return error, "agent_runtime", {
+                "error": error,
+                "invoked_agent": None,
+                "registry_lookup": "not_found",
+                "runtime_status": "not_started",
+                "sandbox_used": False,
+            }
+
+        runtime = self._get_agent_runtime()
+        registry_status = runtime.reload()
+        available = set(registry_status.get("agents") or [])
+        resolved_slug = invocation.agent_slug
+        if resolved_slug not in available and not resolved_slug.endswith("_agent"):
+            candidate = f"{resolved_slug}_agent"
+            if candidate in available:
+                resolved_slug = candidate
+
+        if resolved_slug not in available:
+            error = f"Agent introuvable : {invocation.agent_slug}"
+            return error, "agent_runtime", {
+                "error": error,
+                "invoked_agent": invocation.agent_slug,
+                "registry_lookup": "not_found",
+                "runtime_status": "not_started",
+                "sandbox_used": False,
+            }
+
+        execution = await runtime.run_agent(
+            resolved_slug,
+            invocation.agent_input,
+            metadata={
+                **request_metadata,
+                "invocation_source": "core_orchestrator",
+                "original_query": query,
+            },
+        )
+        metadata = {
+            "invoked_agent": execution.agent_slug or resolved_slug,
+            "registry_lookup": "found",
+            "runtime_status": execution.status,
+            "sandbox_used": bool(getattr(execution, "sandbox_used", False)),
+            "sandbox_backend": getattr(execution, "sandbox_backend", None),
+            "sandbox_isolation": getattr(execution, "sandbox_isolation", None),
+            "sudo_used": bool(getattr(execution, "sudo_used", False)),
+            "runtime_execution": execution.to_dict(),
+        }
+        if not execution.ok:
+            error = execution.error or "agent_execution_failed"
+            return (
+                f"Erreur agent {resolved_slug} : {error}",
+                "agent_runtime",
+                {**metadata, "error": error},
+            )
+        return execution.response, "agent_runtime", {**metadata, "error": None}
+
     async def _execute_identity(
         self,
         query: str,
@@ -667,6 +753,13 @@ class CoreOrchestrator:
             self._goal_background_runner = get_goal_background_runner()
         return self._goal_background_runner
 
+    def _get_agent_runtime(self) -> Any:
+        if self._agent_runtime_factory is None:
+            from agents.runtime.runtime import get_agent_runtime
+
+            self._agent_runtime_factory = get_agent_runtime
+        return self._agent_runtime_factory()
+
     @staticmethod
     def _log_used(
         event: str,
@@ -724,6 +817,12 @@ _TOOL_INTENTS = {
 }
 
 
+@dataclass(frozen=True)
+class AgentInvocation:
+    agent_slug: str
+    agent_input: str
+
+
 def _normalize(text: str) -> str:
     normalized = unicodedata.normalize("NFD", text.lower())
     normalized = "".join(
@@ -732,6 +831,64 @@ def _normalize(text: str) -> str:
     return " ".join(
         normalized.replace("'", " ").replace("’", " ").replace("-", " ").split()
     )
+
+
+def _parse_agent_invocation(query: str) -> AgentInvocation | None:
+    raw = query.strip()
+    if not raw:
+        return None
+
+    if raw.lower().startswith("/agent"):
+        try:
+            arguments = shlex.split(raw)
+        except ValueError:
+            return None
+        if len(arguments) < 3 or arguments[:2] != ["/agent", "run"]:
+            return None
+        slug = _clean_invoked_agent_slug(arguments[2])
+        if not slug:
+            return None
+        agent_input = ""
+        if "--input" in arguments[3:]:
+            input_index = arguments.index("--input", 3)
+            agent_input = " ".join(arguments[input_index + 1 :]).strip()
+        return AgentInvocation(slug, agent_input)
+
+    execution_match = re.match(
+        r"^\s*(?:lance|ex[eé]cute)\s+"
+        r"(?:(?:l['’]?\s*agent|agent)\s+)?"
+        r"([A-Za-z0-9_.-]+)"
+        r"(?:\s*:\s*(.*))?\s*$",
+        raw,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if execution_match:
+        slug = _clean_invoked_agent_slug(execution_match.group(1))
+        if slug in {"la", "le", "les", "prochaine", "prochain"}:
+            return None
+        return AgentInvocation(
+            slug,
+            str(execution_match.group(2) or "").strip(),
+        )
+
+    request_match = re.match(
+        r"^\s*demande\s+[aà]\s+([A-Za-z0-9_.-]+)"
+        r"(?:\s+de\s+r[eé]pondre)?"
+        r"(?:\s*:\s*(.*))?\s*$",
+        raw,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if request_match:
+        slug = _clean_invoked_agent_slug(request_match.group(1))
+        if not slug:
+            return None
+        return AgentInvocation(slug, str(request_match.group(2) or "").strip())
+
+    return None
+
+
+def _clean_invoked_agent_slug(value: str) -> str:
+    return re.sub(r"[^a-z0-9_.-]+", "", value.lower()).replace("-", "_")
 
 
 def _complexity(query: str) -> str:
@@ -771,6 +928,19 @@ def _is_memory_request(query: str) -> bool:
             "cherche dans la memoire",
             "recherche memoire",
             "retrouve mes notes",
+        )
+    )
+
+
+def _is_self_model_request(query: str) -> bool:
+    return any(
+        token in query
+        for token in (
+            "que sais tu de toi meme",
+            "etat interne",
+            "modele interne",
+            "modele de toi",
+            "representation interne",
         )
     )
 

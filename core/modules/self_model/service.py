@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -13,7 +14,12 @@ from core.modules.status.service import build_status_payload
 
 
 DEFAULT_TZ = "Europe/Paris"
-STATE_PATH = Path("/etc/neron/data/self_model_state.json")
+STATE_PATH = Path(
+    os.getenv(
+        "NERON_SELF_MODEL_STATE_PATH",
+        "/etc/neron/data/self_model_state.json",
+    )
+)
 
 
 def _now_iso() -> str:
@@ -87,6 +93,51 @@ def _safe_goal_runtime() -> dict[str, Any]:
     }
 
 
+def _safe_task_state() -> dict[str, Any]:
+    try:
+        from goal.system.task_manager import get_task_manager
+
+        tasks = get_task_manager().list_tasks()
+    except Exception as exc:
+        return {
+            "summary": {
+                "total": 0,
+                "active": 0,
+                "pending": 0,
+                "running": 0,
+                "failed": 0,
+            },
+            "error": str(exc),
+        }
+
+    statuses = [
+        str(task.get("status") or "unknown").lower()
+        for task in tasks
+        if isinstance(task, dict)
+    ]
+    return {
+        "summary": {
+            "total": len(statuses),
+            "active": sum(
+                status in {"pending", "active", "todo", "in_progress", "running"}
+                for status in statuses
+            ),
+            "pending": sum(
+                status in {"pending", "todo", "queued"}
+                for status in statuses
+            ),
+            "running": sum(
+                status in {"running", "in_progress"}
+                for status in statuses
+            ),
+            "failed": sum(
+                status in {"failed", "error"}
+                for status in statuses
+            ),
+        }
+    }
+
+
 def _runtime_from_status(status: dict[str, Any]) -> dict[str, Any]:
     resources = status.get("resources") or {}
     return {
@@ -117,25 +168,29 @@ def _services_from_status(status: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _cognitive_state_from_status(status: dict[str, Any]) -> dict[str, Any]:
-    healthy = status.get("global_status") == "healthy"
-    state = "stable" if healthy else "warning"
-    runtime_mode = "normal" if healthy else "prudent"
-    severity_score = 0 if healthy else 45
+def _cognitive_state_from_status(
+    status: dict[str, Any],
+    diagnostics: list[str],
+) -> dict[str, Any]:
+    operationally_healthy = status.get("global_status") == "healthy"
+    consolidated_healthy = operationally_healthy and not diagnostics
+    state = "stable" if consolidated_healthy else "warning"
+    runtime_mode = "normal" if consolidated_healthy else "prudent"
+    severity_score = 0 if consolidated_healthy else 45
     return {
         "state": state,
         "severity_score": severity_score,
-        "primary_issue": None if healthy else "status_degraded",
-        "runtime_pressure": "normal" if healthy else "moderate",
-        "autonomy_available": healthy,
-        "degraded_mode": not healthy,
-        "critical_services_ok": healthy,
+        "primary_issue": None if consolidated_healthy else "consolidated_state_warning",
+        "runtime_pressure": "normal" if consolidated_healthy else "moderate",
+        "autonomy_available": consolidated_healthy,
+        "degraded_mode": not consolidated_healthy,
+        "critical_services_ok": operationally_healthy,
         "runtime_mode": runtime_mode,
         "planner_enabled": True,
-        "heavy_reasoning_allowed": healthy,
+        "heavy_reasoning_allowed": consolidated_healthy,
         "autonomous_actions_allowed": True,
-        "max_parallel_agents": 3 if healthy else 1,
-        "source": "status_module",
+        "max_parallel_agents": 3 if consolidated_healthy else 1,
+        "source": "self_model_consolidation",
     }
 
 
@@ -143,17 +198,63 @@ def build_self_model_snapshot() -> dict[str, Any]:
     status = build_status_payload()
     memory = _safe_memory_status()
     goal = _safe_goal_runtime()
+    tasks = _safe_task_state()
     identity = _safe_identity()
     runtime = _runtime_from_status(status)
     services = _services_from_status(status)
-    cognitive_state = _cognitive_state_from_status(status)
-    health_global = "stable" if status.get("global_status") == "healthy" else "stable_with_warning"
+    diagnostics: list[str] = []
+    recommendations: list[str] = []
+
+    if status.get("global_status") != "healthy":
+        diagnostics.append("Status opérationnel dégradé.")
+        recommendations.append(
+            "Consulter le module Status avant une action lourde."
+        )
+
+    goal_runtime = goal.get("runtime_status") or {}
+    goal_runtime_status = str(goal_runtime.get("status") or "").lower()
+    if goal_runtime_status in {"interrupted", "failed", "error"}:
+        diagnostics.append(
+            f"Goal Runtime en état {goal_runtime_status}."
+        )
+        recommendations.append(
+            "Réconcilier ou relancer explicitement le goal interrompu."
+        )
+
+    task_summary = tasks.get("summary") or {}
+    failed_tasks = int(task_summary.get("failed") or 0)
+    if failed_tasks:
+        diagnostics.append(f"{failed_tasks} tâche(s) en échec.")
+        recommendations.append(
+            "Examiner les tâches en échec avant de déclarer l’état stable."
+        )
+
+    status_sources = status.get("sources") or {}
+    unavailable_sources = sorted(
+        name
+        for name in ("doctor", "watchdog", "prometheus")
+        if (status_sources.get(name) or {}).get("status") != "integrated"
+    )
+    if unavailable_sources:
+        diagnostics.append(
+            "Sources de supervision non intégrées : "
+            + ", ".join(unavailable_sources)
+            + "."
+        )
+
+    cognitive_state = _cognitive_state_from_status(status, diagnostics)
+    health_global = (
+        "stable"
+        if status.get("global_status") == "healthy" and not diagnostics
+        else "stable_with_warning"
+    )
 
     return {
         "identity": identity,
         "memory": memory,
         "status": status,
         "goal": goal,
+        "tasks": tasks,
         "generated_at": _now_iso(),
         "runtime": runtime,
         "services": services,
@@ -168,8 +269,8 @@ def build_self_model_snapshot() -> dict[str, Any]:
         "runtime_mode": cognitive_state["runtime_mode"],
         "active_goal": goal.get("active_goal"),
         "cognitive_state": cognitive_state,
-        "diagnostics": [] if status.get("global_status") == "healthy" else ["Status opérationnel dégradé."],
-        "recommendations": [] if status.get("global_status") == "healthy" else ["Consulter le module Status avant une action lourde."],
+        "diagnostics": diagnostics,
+        "recommendations": recommendations,
         "last_update": time.time(),
     }
 

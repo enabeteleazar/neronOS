@@ -3,7 +3,6 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from modules.cognitive_core.core import CognitiveCore
-from modules.cognitive_core.core import CognitiveCore
 from goal.goals.goal_manager import get_goal_manager
 from core.modules.self_model import get_self_model
 from goal.system.task_manager import get_task_manager
