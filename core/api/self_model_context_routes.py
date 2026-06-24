@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from modules.self_model.self_model import get_self_model
+from core.modules.self_model import get_self_model, get_self_model_status
 from goal.system.task_manager import get_task_manager
 from modules.code_awareness.scanner import scan_project
 from core.identity import get_identity
@@ -12,15 +12,23 @@ router = APIRouter(tags=["self-model-context"])
 
 @router.get("/self-model/status")
 async def self_model_status() -> dict:
-    model = get_self_model()
-    model.collect_runtime()
-    data = model.to_dict()
+    try:
+        model = get_self_model()
+        model.refresh()
+        data = model.to_dict()
+    except Exception:
+        return get_self_model_status()
 
     return {
-        "health": data.get("health"),
+        "health": data.get("health") or {
+            "realtime": data.get("health_realtime"),
+            "historical": data.get("health_historical"),
+            "global": data.get("health_global"),
+        },
         "runtime_mode": data.get("runtime_mode"),
         "last_update": data.get("last_update"),
         "diagnostics": data.get("diagnostics", []),
+        "status": data.get("status", {}),
     }
 
 
@@ -90,12 +98,14 @@ async def self_model_context() -> dict:
 
     return {
         "identity": get_identity(),
+        "memory": data.get("memory", {}),
+        "status": data.get("status", {}),
         "health": {
             "realtime": data.get("health_realtime"),
             "historical": data.get("health_historical"),
             "global": data.get("health_global"),
         },
-        "goal": data.get("active_goal"),
+        "goal": data.get("goal", {"active_goal": data.get("active_goal")}),
         "tasks": {
             "summary": task_summary,
             "next": next_task,

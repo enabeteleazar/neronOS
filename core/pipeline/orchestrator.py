@@ -9,6 +9,7 @@ from typing import Any
 
 from agents.builtin.base_agent import get_logger
 from modules.capabilities.models import CapabilityRequest
+from core.constants import NERON_HELP_TEXT
 from core.pipeline.intent.intent_router import Intent, IntentResult, IntentRouter
 from core.pipeline.routing.agent_router import AgentRouter
 from core.modules.timer import detect_timer_intent, build_timer_response
@@ -111,7 +112,14 @@ class CoreOrchestrator:
         status_result = detect_status_intent(query)
         memory_result = detect_memory_intent(query)
 
-        if explicit_route == "goal_pipeline" or normalized.startswith("/goal "):
+        if normalized == "/help":
+            decision = OrchestratorDecision(
+                intent="help",
+                selected_route="help_provider",
+                reason="Commande d'aide explicite traitée localement par le Core.",
+                complexity="simple",
+            )
+        elif explicit_route == "goal_pipeline" or normalized.startswith("/goal "):
             decision = OrchestratorDecision(
                 intent="goal",
                 selected_route="goal_pipeline",
@@ -176,6 +184,14 @@ class CoreOrchestrator:
                 complexity="simple",
                 requires_timer=True,
             )
+        elif intent == Intent.SELF_STATUS:
+            decision = OrchestratorDecision(
+                intent=Intent.SELF_STATUS.value,
+                selected_route="tool_router",
+                reason="Demande de modèle interne traitée par le SelfModel local.",
+                complexity="simple",
+                requires_tool=True,
+            )
         elif memory_result.get("matched") or _is_memory_request(normalized):
             decision = OrchestratorDecision(
                 intent="memory_query",
@@ -188,19 +204,19 @@ class CoreOrchestrator:
         elif intent in {Intent.AGENT_CREATION, Intent.TOOL_CREATION}:
             decision = OrchestratorDecision(
                 intent=intent.value,
-                selected_route="agent_factory",
-                reason="Creation explicite demandee; delegation au builder canonique.",
+                selected_route="goal_pipeline",
+                reason="Création explicite déléguée au Goal Engine, autorité canonique du pipeline de construction.",
                 complexity="complex",
-                requires_agent_factory=True,
+                requires_goal_pipeline=True,
                 requires_governor=True,
             )
-        elif _is_agent_maintenance(normalized):
+        elif _requires_goal_pipeline(normalized):
             decision = OrchestratorDecision(
-                intent="agent_update",
-                selected_route="tool_router",
-                reason="Commande explicite de maintenance d'agent.",
-                complexity=complexity,
-                requires_tool=True,
+                intent=intent.value,
+                selected_route="goal_pipeline",
+                reason="Demande complexe de construction ou d'exécution structurée déléguée au Goal Engine.",
+                complexity="complex",
+                requires_goal_pipeline=True,
                 requires_governor=True,
             )
         elif _requires_specialized_resolution(normalized):
@@ -381,6 +397,10 @@ class CoreOrchestrator:
     ) -> tuple[str, str, dict[str, Any]]:
         route = decision.selected_route
 
+        if route == "help_provider":
+            self._log_used("help_used", decision)
+            return NERON_HELP_TEXT, "help_provider", {}
+
         if route == "timer_engine":
             self._log_used("timer_used", decision)
             return self._execute_timer(query, decision)
@@ -510,7 +530,11 @@ class CoreOrchestrator:
     ) -> tuple[str, str, dict[str, Any]]:
         status_result = detect_status_intent(query)
         kind = status_result.get("kind") or "core_status"
-        result = await build_status_response_async(kind, question=query)
+        result = await build_status_response_async(
+            kind,
+            question=query,
+            use_llm=False,
+        )
         normalized_kind = result.get("status_kind") or kind
 
         metadata = {
@@ -534,7 +558,11 @@ class CoreOrchestrator:
     ) -> tuple[str, str, dict[str, Any]]:
         identity_result = detect_identity_intent(query)
         kind = identity_result.get("kind") or "identity"
-        result = await build_identity_response_async(kind, question=query)
+        result = await build_identity_response_async(
+            kind,
+            question=query,
+            use_llm=False,
+        )
 
         metadata = {
             "selected_route": "identity_provider",
@@ -757,13 +785,26 @@ def _requires_specialized_resolution(query: str) -> bool:
         "previens moi",
     )
     complex_request = (
-        "analyse cette demande complexe",
         "capacite specialisee",
         "paques",
         "sous reseau",
         "subnet",
     )
     return any(token in query for token in durable + complex_request)
+
+
+def _requires_goal_pipeline(query: str) -> bool:
+    return any(
+        token in query
+        for token in (
+            "analyse cette demande complexe",
+            "tache complexe",
+            "demande complexe",
+            "construis ",
+            "construire ",
+            "construction ",
+        )
+    )
 
 
 def _is_task_command(query: str) -> bool:

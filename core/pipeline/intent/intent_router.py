@@ -144,6 +144,8 @@ def _fallback_intent(query: str) -> Intent | None:
         "selfmodel",
         "que sais tu de toi",
         "que sais-tu de toi",
+        "que sais tu de toi meme",
+        "que sais-tu de toi-même",
         "tes capacites",
         "tes capacités",
         "capacites de neron",
@@ -461,7 +463,7 @@ class IntentRouter:
         )
 
         try:
-            from modules.self_model.self_model import get_self_model
+            from core.modules.self_model import get_self_model
 
             model = get_self_model()
             model.set_last_intent(

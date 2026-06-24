@@ -76,9 +76,27 @@ def build_status_payload() -> dict:
         "platform": platform.platform(),
         "core": "online",
         "modules": modules,
+        "services": {
+            "core": "online",
+            "modules": modules,
+            "goal_pipeline": goal_pipeline,
+        },
         "goal_pipeline": goal_pipeline,
         "llm": "unknown",
         "resources": _system_resources(),
+        "health": {
+            "status": "healthy" if healthy else "degraded",
+            "checks": {
+                "modules": modules,
+                "goal_pipeline": goal_pipeline,
+            },
+        },
+        "sources": {
+            "doctor": {"status": "not_integrated"},
+            "watchdog": {"status": "not_integrated"},
+            "prometheus": {"status": "not_integrated"},
+            "services": {"status": "local_payload"},
+        },
     }
 
 
@@ -130,6 +148,12 @@ def build_status_fallback(payload: dict[str, Any], kind: str = "core_status") ->
     status = payload.get("global_status")
     resources = payload.get("resources") or {}
     services = _active_services(payload)
+
+    if kind == "location_query":
+        return (
+            f"Je fonctionne actuellement sur l'hôte {payload.get('hostname', 'inconnu')}. "
+            "Cette information provient directement du module Status."
+        )
 
     if kind == "modules_query":
         modules = _loaded_modules(payload)

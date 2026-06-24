@@ -14,6 +14,14 @@ def normalize(text: str) -> str:
 def detect_status_intent(text: str) -> dict:
     value = normalize(text)
 
+    location_patterns = [
+        "ou es tu",
+        "ou tourne neron",
+        "sur quelle machine es tu",
+        "sur quel serveur es tu",
+        "quel est ton hostname",
+    ]
+
     modules_patterns = [
         "quels modules sont charges",
         "quels modules sont disponibles",
@@ -68,6 +76,9 @@ def detect_status_intent(text: str) -> dict:
         "neron status",
         "etat de neron",
     ]
+
+    if any(p in value for p in location_patterns):
+        return {"matched": True, "kind": "location_query", "confidence": 0.95}
 
     if any(p in value for p in modules_patterns):
         return {"matched": True, "kind": "modules_query", "confidence": 0.97}

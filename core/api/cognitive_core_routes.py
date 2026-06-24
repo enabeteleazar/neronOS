@@ -5,7 +5,7 @@ from fastapi import APIRouter
 from modules.cognitive_core.core import CognitiveCore
 from modules.cognitive_core.core import CognitiveCore
 from goal.goals.goal_manager import get_goal_manager
-from modules.self_model.self_model import get_self_model
+from core.modules.self_model import get_self_model
 from goal.system.task_manager import get_task_manager
 from modules.world_model.world_model import get_world_model
 

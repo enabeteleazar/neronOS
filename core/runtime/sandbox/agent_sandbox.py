@@ -78,6 +78,7 @@ class AgentSandbox:
         if self._backend_used == "systemd":
             isolation = "systemd"
         return {
+            "backend_selected": self._backend_used,
             "backend_used": self._backend_used,
             "isolation_level": self._isolation_level(isolation),
             "systemd_available": self._systemd_available,
@@ -345,6 +346,7 @@ class AgentSandbox:
 
     def _result_diagnostics(self, isolation: str) -> dict[str, Any]:
         return {
+            "backend_selected": self._backend_used,
             "backend_used": self._backend_used,
             "isolation_level": self._isolation_level(isolation),
             "systemd_available": self._systemd_available,

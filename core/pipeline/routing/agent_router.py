@@ -162,7 +162,7 @@ def _get_wiki():
 
 
 def _get_self_model():
-    from modules.self_model.self_model import get_self_model
+    from core.modules.self_model import get_self_model
     return get_self_model()
 
 

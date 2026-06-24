@@ -24,7 +24,7 @@ from telegram.ext import (
 )
 
 from core.config import settings
-from core.constants import CODE_KEYWORDS
+from core.constants import CODE_KEYWORDS, NERON_HELP_TEXT
 from agents.builtin.automation.watchdog_agent import get_anomalies, get_health_score, get_status
 
 logger = logging.getLogger("neron.gateway.telegram")
@@ -233,26 +233,7 @@ class TelegramGateway:
     ) -> None:
         if not self._is_authorized(update):
             return await self._unauthorized(update)
-        await update.message.reply_text(
-            "🤖 <b>Néron — Commandes disponibles</b>\n\n"
-            "💬 <b>Conversation</b>\n"
-            "  Envoyez n'importe quel message pour parler à Néron\n\n"
-            "🔧 <b>Code</b>\n"
-            "  /fix &lt;fichier.py&gt; — améliore un fichier\n"
-            "  /review — auto-review du code\n"
-            "  /run &lt;fichier.py&gt; — exécute un script du workspace\n"
-            "  /workspace — liste les fichiers du workspace\n\n"
-            "🧠 <b>Mémoire</b>\n"
-            "  /memory — 5 derniers échanges\n\n"
-            "🏠 <b>Home Assistant</b>\n"
-            "  /ha_reload — recharge les entités HA\n\n"
-            "📊 <b>Système</b>\n"
-            "  /status — CPU, RAM, disque, uptime\n\n"
-            "📞 <b>Téléphonie</b>\n"
-            "  /call [message] — appel vocal via Twilio\n\n"
-            "❓ /help — cette aide",
-            parse_mode="HTML",
-        )
+        await update.message.reply_text(NERON_HELP_TEXT)
 
     async def _cmd_status(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
