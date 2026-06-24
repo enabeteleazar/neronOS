@@ -1,32 +1,23 @@
 from __future__ import annotations
 
-import json
+import os
 from pathlib import Path
 from fastapi import APIRouter
+from modules.cognitive.history import read_jsonl_tail
 
 
-ACTION_HISTORY_PATH = Path("/etc/neron/data/action_history.jsonl")
+ACTION_HISTORY_PATH = Path(
+    os.getenv(
+        "NERON_ACTION_HISTORY_PATH",
+        "/etc/neron/data/action_history.jsonl",
+    )
+)
 
 router = APIRouter(tags=["action-history"])
 
 
 def _read_history(limit: int = 20) -> list[dict]:
-    if not ACTION_HISTORY_PATH.exists():
-        return []
-
-    lines = ACTION_HISTORY_PATH.read_text(
-        encoding="utf-8"
-    ).splitlines()
-
-    items: list[dict] = []
-
-    for line in lines[-limit:]:
-        try:
-            items.append(json.loads(line))
-        except Exception:
-            continue
-
-    return items
+    return read_jsonl_tail(ACTION_HISTORY_PATH, limit=limit)
 
 
 @router.get("/actions/history")

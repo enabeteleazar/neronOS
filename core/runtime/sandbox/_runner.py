@@ -7,8 +7,10 @@ import json
 import os
 import pathlib
 import resource
+import socket
 import sys
 import traceback
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -50,7 +52,10 @@ def _inside(path: Any, workspace: pathlib.Path) -> bool:
         return False
 
 
-def _install_audit_guard(workspace: pathlib.Path) -> None:
+def _install_audit_guard(
+    workspace: pathlib.Path,
+    tool_socket: pathlib.Path | None = None,
+) -> None:
     def guard(event: str, args: tuple[Any, ...]) -> None:
         if event == "open":
             path = args[0] if args else None
@@ -69,7 +74,12 @@ def _install_audit_guard(workspace: pathlib.Path) -> None:
             return
         if event in {"os.system", "subprocess.Popen"}:
             raise PermissionError("sandbox_subprocess_blocked")
-        if event in {"socket.bind", "socket.connect", "socket.getaddrinfo"}:
+        if event == "socket.connect":
+            destination = args[1] if len(args) > 1 else None
+            if tool_socket is not None and str(destination) == str(tool_socket):
+                return
+            raise PermissionError("sandbox_network_blocked")
+        if event in {"socket.bind", "socket.getaddrinfo"}:
             raise PermissionError("sandbox_network_blocked")
 
     sys.addaudithook(guard)
@@ -90,6 +100,79 @@ def _apply_limits(config: dict[str, Any]) -> None:
         resource.setrlimit(resource.RLIMIT_NPROC, (processes, processes))
 
 
+@dataclass
+class _SandboxToolResult:
+    ok: bool
+    response: str = ""
+    data: dict[str, Any] | None = None
+    error: str | None = None
+
+
+class _SandboxTool:
+    def __init__(self, slug: str, socket_path: str) -> None:
+        self.slug = slug
+        self.socket_path = socket_path
+
+    async def execute(
+        self,
+        payload: dict[str, Any] | None = None,
+    ) -> _SandboxToolResult:
+        request = json.dumps(
+            {"slug": self.slug, "payload": dict(payload or {})},
+            ensure_ascii=True,
+        ).encode("utf-8") + b"\n"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.connect(self.socket_path)
+            client.sendall(request)
+            raw = _recv_line(client)
+        response = json.loads(raw.decode("utf-8"))
+        return _SandboxToolResult(
+            ok=bool(response.get("ok")),
+            response=str(response.get("response") or ""),
+            data=dict(response.get("data") or {}),
+            error=str(response["error"]) if response.get("error") else None,
+        )
+
+
+class _SandboxExecutionContext:
+    def __init__(
+        self,
+        request: str,
+        context: dict[str, Any],
+        metadata: dict[str, Any],
+        tools: dict[str, _SandboxTool],
+    ) -> None:
+        self.request = request
+        self.context = context
+        self.metadata = metadata
+        self.tools = tools
+
+    async def run_tool(
+        self,
+        slug: str,
+        payload: dict[str, Any] | None = None,
+    ) -> _SandboxToolResult:
+        tool = self.tools.get(slug)
+        if tool is None:
+            return _SandboxToolResult(
+                ok=False,
+                error=f"tool_not_bound:{slug}",
+            )
+        return await tool.execute(payload)
+
+
+def _recv_line(client: socket.socket) -> bytes:
+    chunks: list[bytes] = []
+    while True:
+        chunk = client.recv(65536)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        if b"\n" in chunk:
+            break
+    return b"".join(chunks).split(b"\n", 1)[0]
+
+
 async def _execute_agent(config: dict[str, Any]) -> Any:
     agent_path = pathlib.Path(config["agent_path"])
     module_spec = importlib.util.spec_from_file_location(
@@ -104,10 +187,37 @@ async def _execute_agent(config: dict[str, Any]) -> Any:
     execute = agent.execute
     parameters = inspect.signature(execute).parameters
     prompt = str(config.get("prompt") or "")
-    if "text" in parameters:
-        result = execute(text=prompt)
-    elif "query" in parameters:
-        result = execute(query=prompt)
+    socket_path = str(config.get("tool_socket") or "")
+    tools = {
+        slug: _SandboxTool(slug, socket_path)
+        for slug in config.get("tool_names") or []
+    }
+    execution_context = _SandboxExecutionContext(
+        prompt,
+        dict(config.get("context") or {}),
+        dict(config.get("metadata") or {}),
+        tools,
+    )
+    available = {
+        "text": prompt,
+        "query": prompt,
+        "request": prompt,
+        "execution_context": execution_context,
+        "context": execution_context,
+        "metadata": execution_context.metadata,
+        "tools": tools,
+    }
+    accepts_kwargs = any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters.values()
+    )
+    kwargs = {
+        name: value
+        for name, value in available.items()
+        if accepts_kwargs or name in parameters
+    }
+    if kwargs:
+        result = execute(**kwargs)
     elif parameters:
         first = next(iter(parameters.values()))
         if first.kind in (
@@ -147,11 +257,16 @@ def main() -> None:
     config = json.loads(sys.argv[1])
     workspace = pathlib.Path(config["workspace"]).resolve()
     project_root = pathlib.Path(config["project_root"]).resolve()
+    tool_socket = (
+        pathlib.Path(config["tool_socket"]).resolve()
+        if config.get("tool_socket")
+        else None
+    )
     os.chdir(workspace)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str(project_root))
     _apply_limits(config)
-    _install_audit_guard(workspace)
+    _install_audit_guard(workspace, tool_socket)
     try:
         payload = _run(config)
     except BaseException as exc:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from modules.self_model.self_model import get_self_model
+from core.modules.self_model import build_self_model_response, get_self_model
 
 router = APIRouter(
     prefix="/self-model",
@@ -13,16 +13,16 @@ router = APIRouter(
 @router.get("")
 async def self_model_state() -> dict:
     sm = get_self_model()
-    sm.collect_runtime()
+    sm.refresh()
     return sm.to_dict()
 
 
 @router.get("/summary")
 async def self_model_summary() -> dict:
     sm = get_self_model()
-    sm.collect_runtime()
+    sm.refresh()
 
     return {
-        "summary": sm.summary(),
+        "summary": build_self_model_response("Que sais-tu de toi-même ?"),
         "state": sm.to_dict(),
     }

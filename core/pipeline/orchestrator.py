@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import time
 import unicodedata
 from dataclasses import asdict, dataclass, field
@@ -9,12 +10,19 @@ from typing import Any
 
 from agents.builtin.base_agent import get_logger
 from modules.capabilities.models import CapabilityRequest
+from core.constants import NERON_HELP_TEXT
 from core.pipeline.intent.intent_router import Intent, IntentResult, IntentRouter
 from core.pipeline.routing.agent_router import AgentRouter
 from core.modules.timer import detect_timer_intent, build_timer_response
-from core.modules.identity import detect_identity_intent, build_identity_response
-from core.modules.status import detect_status_intent, build_status_response
-from core.modules.memory import detect_memory_intent, build_memory_response
+from core.modules.identity import (
+    build_identity_response_async,
+    detect_identity_intent,
+)
+from core.modules.status import (
+    build_status_response_async,
+    detect_status_intent,
+)
+from core.modules.memory import detect_memory_intent, build_memory_response_async
 
 logger = get_logger("core.pipeline.orchestrator")
 
@@ -82,6 +90,7 @@ class CoreOrchestrator:
         goal_execution_engine: Any | None = None,
         goal_background_runner: Any | None = None,
         runtime_governor: Any | None = None,
+        agent_runtime_factory: Any | None = None,
     ) -> None:
         self.intent_router = intent_router or IntentRouter()
         self.agent_router = agent_router or AgentRouter()
@@ -90,6 +99,7 @@ class CoreOrchestrator:
         self._goal_execution_engine = goal_execution_engine
         self._goal_background_runner = goal_background_runner
         self._runtime_governor = runtime_governor
+        self._agent_runtime_factory = agent_runtime_factory
 
     async def decide(
         self,
@@ -104,8 +114,16 @@ class CoreOrchestrator:
         timer_result = detect_timer_intent(query)
         status_result = detect_status_intent(query)
         memory_result = detect_memory_intent(query)
+        agent_invocation = _parse_agent_invocation(query)
 
-        if explicit_route == "goal_pipeline" or normalized.startswith("/goal "):
+        if normalized == "/help":
+            decision = OrchestratorDecision(
+                intent="help",
+                selected_route="help_provider",
+                reason="Commande d'aide explicite traitée localement par le Core.",
+                complexity="simple",
+            )
+        elif explicit_route == "goal_pipeline" or normalized.startswith("/goal "):
             decision = OrchestratorDecision(
                 intent="goal",
                 selected_route="goal_pipeline",
@@ -113,6 +131,13 @@ class CoreOrchestrator:
                 complexity="complex",
                 requires_goal_pipeline=True,
                 requires_governor=True,
+            )
+        elif agent_invocation is not None:
+            decision = OrchestratorDecision(
+                intent="agent_invocation",
+                selected_route="registered_agent_runtime",
+                reason="Invocation explicite d'un agent enregistré traitée par le Runtime.",
+                complexity="simple",
             )
         elif _is_agent_maintenance(normalized):
             decision = OrchestratorDecision(
@@ -131,7 +156,15 @@ class CoreOrchestrator:
                 complexity="simple",
                 requires_timer=True,
             )
-        elif status_result.get("matched"):
+        elif _is_self_model_request(normalized):
+            decision = OrchestratorDecision(
+                intent=Intent.SELF_STATUS.value,
+                selected_route="tool_router",
+                reason="Demande de modèle interne traitée par le SelfModel local.",
+                complexity="simple",
+                requires_tool=True,
+            )
+        elif status_result.get("matched") or intent == Intent.SYSTEM_STATUS:
             decision = OrchestratorDecision(
                 intent="status_query",
                 selected_route="status_provider",
@@ -170,6 +203,14 @@ class CoreOrchestrator:
                 complexity="simple",
                 requires_timer=True,
             )
+        elif intent == Intent.SELF_STATUS:
+            decision = OrchestratorDecision(
+                intent=Intent.SELF_STATUS.value,
+                selected_route="tool_router",
+                reason="Demande de modèle interne traitée par le SelfModel local.",
+                complexity="simple",
+                requires_tool=True,
+            )
         elif memory_result.get("matched") or _is_memory_request(normalized):
             decision = OrchestratorDecision(
                 intent="memory_query",
@@ -182,19 +223,19 @@ class CoreOrchestrator:
         elif intent in {Intent.AGENT_CREATION, Intent.TOOL_CREATION}:
             decision = OrchestratorDecision(
                 intent=intent.value,
-                selected_route="agent_factory",
-                reason="Creation explicite demandee; delegation au builder canonique.",
+                selected_route="goal_pipeline",
+                reason="Création explicite déléguée au Goal Engine, autorité canonique du pipeline de construction.",
                 complexity="complex",
-                requires_agent_factory=True,
+                requires_goal_pipeline=True,
                 requires_governor=True,
             )
-        elif _is_agent_maintenance(normalized):
+        elif _requires_goal_pipeline(normalized):
             decision = OrchestratorDecision(
-                intent="agent_update",
-                selected_route="tool_router",
-                reason="Commande explicite de maintenance d'agent.",
-                complexity=complexity,
-                requires_tool=True,
+                intent=intent.value,
+                selected_route="goal_pipeline",
+                reason="Demande complexe de construction ou d'exécution structurée déléguée au Goal Engine.",
+                complexity="complex",
+                requires_goal_pipeline=True,
                 requires_governor=True,
             )
         elif _requires_specialized_resolution(normalized):
@@ -375,17 +416,25 @@ class CoreOrchestrator:
     ) -> tuple[str, str, dict[str, Any]]:
         route = decision.selected_route
 
+        if route == "help_provider":
+            self._log_used("help_used", decision)
+            return NERON_HELP_TEXT, "help_provider", {}
+
+        if route == "registered_agent_runtime":
+            self._log_used("registered_agent_runtime_used", decision)
+            return await self._execute_registered_agent(query, request_metadata)
+
         if route == "timer_engine":
             self._log_used("timer_used", decision)
             return self._execute_timer(query, decision)
 
         if route == "status_provider":
             self._log_used("status_used", decision)
-            return self._execute_status(query, decision)
+            return await self._execute_status(query, decision)
 
         if route == "identity_provider":
             self._log_used("identity_used", decision)
-            return self._execute_identity(query, decision)
+            return await self._execute_identity(query, decision)
 
         if route == "memory_engine":
             self._log_used("memory_used", decision)
@@ -497,14 +546,19 @@ class CoreOrchestrator:
         )
         return response, "llm_agent", {}
 
-    def _execute_status(
+    async def _execute_status(
         self,
         query: str,
         decision: OrchestratorDecision,
     ) -> tuple[str, str, dict[str, Any]]:
         status_result = detect_status_intent(query)
         kind = status_result.get("kind") or "core_status"
-        result = build_status_response(kind)
+        result = await build_status_response_async(
+            kind,
+            question=query,
+            use_llm=False,
+        )
+        normalized_kind = result.get("status_kind") or kind
 
         metadata = {
             "selected_route": "status_provider",
@@ -512,22 +566,89 @@ class CoreOrchestrator:
             "fallback_used": False,
             "retries": 0,
             "source": result.get("source"),
-            "status_kind": kind,
+            "status_kind": normalized_kind,
             "status_confidence": status_result.get("confidence"),
+            "status_llm_used": result.get("llm_used", False),
             "status": result.get("status"),
         }
 
         return result["response"], result["agent"], metadata
 
-    def _execute_identity(
+    async def _execute_registered_agent(
+        self,
+        query: str,
+        request_metadata: dict[str, Any],
+    ) -> tuple[str, str, dict[str, Any]]:
+        invocation = _parse_agent_invocation(query)
+        if invocation is None:
+            error = "Commande d’invocation agent invalide."
+            return error, "agent_runtime", {
+                "error": error,
+                "invoked_agent": None,
+                "registry_lookup": "not_found",
+                "runtime_status": "not_started",
+                "sandbox_used": False,
+            }
+
+        runtime = self._get_agent_runtime()
+        registry_status = runtime.reload()
+        available = set(registry_status.get("agents") or [])
+        resolved_slug = invocation.agent_slug
+        if resolved_slug not in available and not resolved_slug.endswith("_agent"):
+            candidate = f"{resolved_slug}_agent"
+            if candidate in available:
+                resolved_slug = candidate
+
+        if resolved_slug not in available:
+            error = f"Agent introuvable : {invocation.agent_slug}"
+            return error, "agent_runtime", {
+                "error": error,
+                "invoked_agent": invocation.agent_slug,
+                "registry_lookup": "not_found",
+                "runtime_status": "not_started",
+                "sandbox_used": False,
+            }
+
+        execution = await runtime.run_agent(
+            resolved_slug,
+            invocation.agent_input,
+            metadata={
+                **request_metadata,
+                "invocation_source": "core_orchestrator",
+                "original_query": query,
+            },
+        )
+        metadata = {
+            "invoked_agent": execution.agent_slug or resolved_slug,
+            "registry_lookup": "found",
+            "runtime_status": execution.status,
+            "sandbox_used": bool(getattr(execution, "sandbox_used", False)),
+            "sandbox_backend": getattr(execution, "sandbox_backend", None),
+            "sandbox_isolation": getattr(execution, "sandbox_isolation", None),
+            "sudo_used": bool(getattr(execution, "sudo_used", False)),
+            "runtime_execution": execution.to_dict(),
+        }
+        if not execution.ok:
+            error = execution.error or "agent_execution_failed"
+            return (
+                f"Erreur agent {resolved_slug} : {error}",
+                "agent_runtime",
+                {**metadata, "error": error},
+            )
+        return execution.response, "agent_runtime", {**metadata, "error": None}
+
+    async def _execute_identity(
         self,
         query: str,
         decision: OrchestratorDecision,
     ) -> tuple[str, str, dict[str, Any]]:
         identity_result = detect_identity_intent(query)
-        status_result = detect_status_intent(query)
         kind = identity_result.get("kind") or "identity"
-        result = build_identity_response(kind)
+        result = await build_identity_response_async(
+            kind,
+            question=query,
+            use_llm=False,
+        )
 
         metadata = {
             "selected_route": "identity_provider",
@@ -535,8 +656,10 @@ class CoreOrchestrator:
             "fallback_used": False,
             "retries": 0,
             "source": result.get("source"),
+            "identity_source": result.get("source"),
             "identity_kind": kind,
             "identity_confidence": identity_result.get("confidence"),
+            "identity_llm_used": result.get("llm_used", False),
         }
 
         return result["response"], result["agent"], metadata
@@ -569,7 +692,7 @@ class CoreOrchestrator:
     ) -> tuple[str, str, dict[str, Any]]:
         memory_result = detect_memory_intent(query)
         kind = memory_result.get("kind") or "recall"
-        result = build_memory_response(kind, query)
+        result = await build_memory_response_async(kind, query)
 
         metadata = {
             "selected_route": "memory_engine",
@@ -578,7 +701,9 @@ class CoreOrchestrator:
             "retries": 0,
             "source": result.get("source"),
             "memory_kind": kind,
+            "memory_response_mode": result.get("memory_response_mode"),
             "memory_confidence": memory_result.get("confidence"),
+            "memory_llm_used": result.get("memory_llm_used", False),
         }
 
         if "memory" in result:
@@ -586,6 +711,9 @@ class CoreOrchestrator:
 
         if "memories" in result:
             metadata["memories"] = result["memories"]
+
+        if "oblivia_memories" in result:
+            metadata["oblivia_memories"] = result["oblivia_memories"]
 
         return result["response"], result["agent"], metadata
 
@@ -624,6 +752,13 @@ class CoreOrchestrator:
 
             self._goal_background_runner = get_goal_background_runner()
         return self._goal_background_runner
+
+    def _get_agent_runtime(self) -> Any:
+        if self._agent_runtime_factory is None:
+            from agents.runtime.runtime import get_agent_runtime
+
+            self._agent_runtime_factory = get_agent_runtime
+        return self._agent_runtime_factory()
 
     @staticmethod
     def _log_used(
@@ -682,6 +817,12 @@ _TOOL_INTENTS = {
 }
 
 
+@dataclass(frozen=True)
+class AgentInvocation:
+    agent_slug: str
+    agent_input: str
+
+
 def _normalize(text: str) -> str:
     normalized = unicodedata.normalize("NFD", text.lower())
     normalized = "".join(
@@ -690,6 +831,64 @@ def _normalize(text: str) -> str:
     return " ".join(
         normalized.replace("'", " ").replace("’", " ").replace("-", " ").split()
     )
+
+
+def _parse_agent_invocation(query: str) -> AgentInvocation | None:
+    raw = query.strip()
+    if not raw:
+        return None
+
+    if raw.lower().startswith("/agent"):
+        try:
+            arguments = shlex.split(raw)
+        except ValueError:
+            return None
+        if len(arguments) < 3 or arguments[:2] != ["/agent", "run"]:
+            return None
+        slug = _clean_invoked_agent_slug(arguments[2])
+        if not slug:
+            return None
+        agent_input = ""
+        if "--input" in arguments[3:]:
+            input_index = arguments.index("--input", 3)
+            agent_input = " ".join(arguments[input_index + 1 :]).strip()
+        return AgentInvocation(slug, agent_input)
+
+    execution_match = re.match(
+        r"^\s*(?:lance|ex[eé]cute)\s+"
+        r"(?:(?:l['’]?\s*agent|agent)\s+)?"
+        r"([A-Za-z0-9_.-]+)"
+        r"(?:\s*:\s*(.*))?\s*$",
+        raw,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if execution_match:
+        slug = _clean_invoked_agent_slug(execution_match.group(1))
+        if slug in {"la", "le", "les", "prochaine", "prochain"}:
+            return None
+        return AgentInvocation(
+            slug,
+            str(execution_match.group(2) or "").strip(),
+        )
+
+    request_match = re.match(
+        r"^\s*demande\s+[aà]\s+([A-Za-z0-9_.-]+)"
+        r"(?:\s+de\s+r[eé]pondre)?"
+        r"(?:\s*:\s*(.*))?\s*$",
+        raw,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if request_match:
+        slug = _clean_invoked_agent_slug(request_match.group(1))
+        if not slug:
+            return None
+        return AgentInvocation(slug, str(request_match.group(2) or "").strip())
+
+    return None
+
+
+def _clean_invoked_agent_slug(value: str) -> str:
+    return re.sub(r"[^a-z0-9_.-]+", "", value.lower()).replace("-", "_")
 
 
 def _complexity(query: str) -> str:
@@ -733,6 +932,19 @@ def _is_memory_request(query: str) -> bool:
     )
 
 
+def _is_self_model_request(query: str) -> bool:
+    return any(
+        token in query
+        for token in (
+            "que sais tu de toi meme",
+            "etat interne",
+            "modele interne",
+            "modele de toi",
+            "representation interne",
+        )
+    )
+
+
 def _requires_specialized_resolution(query: str) -> bool:
     durable = (
         "automatiquement",
@@ -743,13 +955,26 @@ def _requires_specialized_resolution(query: str) -> bool:
         "previens moi",
     )
     complex_request = (
-        "analyse cette demande complexe",
         "capacite specialisee",
         "paques",
         "sous reseau",
         "subnet",
     )
     return any(token in query for token in durable + complex_request)
+
+
+def _requires_goal_pipeline(query: str) -> bool:
+    return any(
+        token in query
+        for token in (
+            "analyse cette demande complexe",
+            "tache complexe",
+            "demande complexe",
+            "construis ",
+            "construire ",
+            "construction ",
+        )
+    )
 
 
 def _is_task_command(query: str) -> bool:

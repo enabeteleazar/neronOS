@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import threading
 import time
@@ -10,7 +11,9 @@ from pathlib import Path
 from typing import Any, Iterator
 
 
-DEFAULT_DATABASE_PATH = Path("/etc/neron/data/neron_state.sqlite3")
+DEFAULT_DATABASE_PATH = Path(
+    os.getenv("NERON_STATE_DB", "/etc/neron/data/neron_state.sqlite3")
+)
 
 _LOCKS_GUARD = threading.Lock()
 _PATH_LOCKS: dict[str, threading.RLock] = {}

@@ -17,6 +17,9 @@ def detect_timer_intent(text: str) -> dict:
     if not value:
         return {"matched": False, "kind": None, "confidence": 0.0}
 
+    if any(term in value for term in ("paques", "easter")):
+        return {"matched": False, "kind": None, "confidence": 0.0}
+
     time_patterns = [
         "quelle heure",
         "il est quelle heure",

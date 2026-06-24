@@ -5,8 +5,11 @@ import os
 import pwd
 import shutil
 import signal
+import socket
 import subprocess
 import sys
+import threading
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -78,6 +81,7 @@ class AgentSandbox:
         if self._backend_used == "systemd":
             isolation = "systemd"
         return {
+            "backend_selected": self._backend_used,
             "backend_used": self._backend_used,
             "isolation_level": self._isolation_level(isolation),
             "systemd_available": self._systemd_available,
@@ -110,18 +114,29 @@ class AgentSandbox:
         agent_path: Path | str,
         prompt: str,
         *,
+        context: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+        tools: dict[str, Any] | None = None,
         timeout: int | None = None,
         name: str = "agent_execution",
     ) -> dict[str, Any]:
-        result = self._run(
-            {
-                "mode": "agent",
-                "agent_path": str(Path(agent_path).resolve()),
-                "prompt": prompt,
-            },
-            timeout=timeout,
-            name=name,
-        )
+        staged_agent, stage_dir = self._stage_agent(agent_path)
+        try:
+            result = self._run(
+                {
+                    "mode": "agent",
+                    "agent_path": str(staged_agent),
+                    "prompt": prompt,
+                    "context": dict(context or {}),
+                    "metadata": dict(metadata or {}),
+                    "tool_names": sorted(tools or {}),
+                },
+                timeout=timeout,
+                name=name,
+                tool_bindings=dict(tools or {}),
+            )
+        finally:
+            shutil.rmtree(stage_dir, ignore_errors=True)
         payload = result.get("payload") or {}
         if result["returncode"] != 0 or not payload.get("ok"):
             return {
@@ -140,12 +155,31 @@ class AgentSandbox:
             "sandbox": result,
         }
 
+    def _stage_agent(
+        self,
+        agent_path: Path | str,
+    ) -> tuple[Path, Path]:
+        source = Path(agent_path).resolve()
+        if not source.is_file():
+            raise FileNotFoundError(source)
+        sandbox_tmp = self.workspace / ".sandbox_tmp"
+        sandbox_tmp.mkdir(parents=True, exist_ok=True)
+        sandbox_tmp.chmod(0o1777)
+        stage_dir = sandbox_tmp / f"agent-{uuid.uuid4().hex}"
+        stage_dir.mkdir(mode=0o755)
+        stage_dir.chmod(0o755)
+        staged = stage_dir / source.name
+        shutil.copyfile(source, staged)
+        staged.chmod(0o444)
+        return staged, stage_dir
+
     def _run(
         self,
         config: dict[str, Any],
         *,
         timeout: int | None,
         name: str,
+        tool_bindings: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         self.workspace.mkdir(parents=True, exist_ok=True)
         sandbox_tmp = self.workspace / ".sandbox_tmp"
@@ -164,6 +198,12 @@ class AgentSandbox:
                 "processes": 16,
             },
         }
+        tool_server = self._start_tool_server(
+            sandbox_tmp,
+            tool_bindings or {},
+        )
+        if tool_server is not None:
+            payload["tool_socket"] = str(tool_server["path"])
         command = [
             self.python_executable,
             "-I",
@@ -188,6 +228,7 @@ class AgentSandbox:
         started_at = datetime.now(timezone.utc).isoformat()
         preflight_error = self._systemd_preflight_error()
         if preflight_error:
+            self._stop_tool_server(tool_server)
             return {
                 "name": name,
                 "command": self._redacted_command(command),
@@ -242,6 +283,8 @@ class AgentSandbox:
                 **self._result_diagnostics(isolation),
                 "ran_at": started_at,
             }
+        finally:
+            self._stop_tool_server(tool_server)
 
         result = {
             "name": name,
@@ -264,6 +307,102 @@ class AgentSandbox:
             ) == "agent_sandbox_no_result":
                 result["backend_error"] = True
         return result
+
+    def _start_tool_server(
+        self,
+        sandbox_tmp: Path,
+        bindings: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        if not bindings:
+            return None
+        socket_path = sandbox_tmp / f"tools-{uuid.uuid4().hex}.sock"
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(str(socket_path))
+        socket_path.chmod(0o666)
+        server.listen(8)
+        server.settimeout(0.2)
+        stop = threading.Event()
+
+        def serve() -> None:
+            while not stop.is_set():
+                try:
+                    connection, _ = server.accept()
+                except TimeoutError:
+                    continue
+                except OSError:
+                    break
+                with connection:
+                    try:
+                        request = json.loads(
+                            self._recv_line(connection).decode("utf-8")
+                        )
+                        slug = str(request.get("slug") or "")
+                        binding = bindings.get(slug)
+                        if binding is None:
+                            response = {
+                                "ok": False,
+                                "error": f"tool_not_bound:{slug}",
+                            }
+                        else:
+                            value = binding.execute(
+                                dict(request.get("payload") or {})
+                            )
+                            if hasattr(value, "__await__"):
+                                import asyncio
+
+                                value = asyncio.run(value)
+                            response = (
+                                value.to_dict()
+                                if hasattr(value, "to_dict")
+                                else dict(value or {})
+                            )
+                    except Exception as exc:
+                        response = {
+                            "ok": False,
+                            "error": f"tool_bridge_error:{exc}",
+                        }
+                    connection.sendall(
+                        json.dumps(
+                            response,
+                            ensure_ascii=True,
+                            default=str,
+                        ).encode("utf-8")
+                        + b"\n"
+                    )
+
+        thread = threading.Thread(
+            target=serve,
+            name="neron-agent-tool-bridge",
+            daemon=True,
+        )
+        thread.start()
+        return {
+            "server": server,
+            "stop": stop,
+            "thread": thread,
+            "path": socket_path,
+        }
+
+    @staticmethod
+    def _recv_line(connection: socket.socket) -> bytes:
+        chunks: list[bytes] = []
+        while True:
+            chunk = connection.recv(65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            if b"\n" in chunk:
+                break
+        return b"".join(chunks).split(b"\n", 1)[0]
+
+    @staticmethod
+    def _stop_tool_server(server_state: dict[str, Any] | None) -> None:
+        if server_state is None:
+            return
+        server_state["stop"].set()
+        server_state["server"].close()
+        server_state["thread"].join(timeout=1)
+        Path(server_state["path"]).unlink(missing_ok=True)
 
     def _select_backend(self) -> tuple[str, str | None]:
         if self.backend == "python":
@@ -345,6 +484,7 @@ class AgentSandbox:
 
     def _result_diagnostics(self, isolation: str) -> dict[str, Any]:
         return {
+            "backend_selected": self._backend_used,
             "backend_used": self._backend_used,
             "isolation_level": self._isolation_level(isolation),
             "systemd_available": self._systemd_available,

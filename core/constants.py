@@ -8,6 +8,53 @@
 
 from __future__ import annotations
 
+# ── Aide utilisateur ──────────────────────────────────────────────────────────
+
+NERON_HELP_TEXT = """🤖 Néron — Commandes disponibles
+
+💬 Conversation
+  Envoyez n'importe quel message pour parler à Néron
+
+🧠 Orchestration
+  /goal <demande> — lance une demande complexe via Goal Engine
+
+🧪 Diagnostics directs
+  ports ouverts
+  liste les services actifs
+  statut système
+
+📊 Système
+  /status — CPU, RAM, disque, uptime
+
+🧭 Code Awareness
+  /code_map — carte simplifiée du dépôt
+  /code_search <terme> — recherche dans le code
+  /code_read <fichier> — lecture sécurisée
+  /code_analyze <fichier> — analyse AST
+  /architecture — vue globale
+
+💻 Workspace
+  /workspace — liste les fichiers du workspace
+  /run <fichier.py> — exécute un script du workspace
+
+🧠 Mémoire
+  /memory — derniers échanges mémorisés
+
+🏠 Home Assistant
+  /ha_reload — recharge les entités Home Assistant
+
+🧬 Évolution supervisée
+  /evolution propose — propose les prochaines évolutions
+  /evolution status — état des évolutions
+  /accept_evolution <id> — valide une proposition
+  /reject_evolution <id> — refuse une proposition
+  /evolution_stop — stoppe la mission active
+
+📞 Téléphonie
+  /call [message] — appel vocal via Twilio
+
+❓ /help — affiche cette aide"""
+
 # ── Mots-clés code / développement ───────────────────────────────────────────
 
 CODE_KEYWORDS: list[str] = [

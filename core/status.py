@@ -1,5 +1,5 @@
 # core/status.py
-# Néron — État système et santé
+# Compat legacy. Le Status canonique est core.modules.status.
 
 from __future__ import annotations
 

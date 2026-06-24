@@ -162,7 +162,7 @@ def _get_wiki():
 
 
 def _get_self_model():
-    from modules.self_model.self_model import get_self_model
+    from core.modules.self_model import get_self_model
     return get_self_model()
 
 
@@ -255,9 +255,34 @@ def _invalid_agent_registry_text() -> str:
     return "\n".join(lines)
 
 
-def _project_status_text(query: str) -> str:
+async def _goal_status_text(query: str) -> str:
+    from core.modules.goal_status_response import build_goal_status_response_async
+    from goal.goals.goal_manager import get_goal_manager
+    from goal.goals.goal_orchestrator import get_goal_orchestrator
+
+    active_goal = get_goal_manager().get_active_goal()
+    if not active_goal:
+        result = await build_goal_status_response_async(None, question=query)
+        return result["response"]
+
+    goal_id = str(active_goal.get("id") or active_goal.get("goal_id") or "")
+    status = dict(active_goal)
+    if goal_id:
+        detailed = get_goal_orchestrator().get_goal_status(goal_id)
+        if detailed:
+            status = {**status, **detailed}
+
+    result = await build_goal_status_response_async(status, question=query)
+    return result["response"]
+
+
+async def _project_status_text(query: str) -> str:
     from agents.factory.build_orchestrator import AgentBuildOrchestrator
     from goal.projects.manager import get_project_manager
+
+    normalized = _normalize(query)
+    if "objectif" in normalized or "goal" in normalized:
+        return await _goal_status_text(query)
 
     manager = get_project_manager()
     matches = manager.find_project_by_query(query, limit=1)
@@ -540,26 +565,14 @@ class AgentRouter:
             return await _promote_dynamic_agent(query)
 
         if intent == Intent.IDENTITY_QUERY:
-            from core.identity import get_identity
-
-            identity = get_identity()
-            name = identity.get("name", "Néron")
-            role = identity.get("role", "système d'exploitation personnel piloté par l'IA")
-            mission = identity.get("mission", "superviser un écosystème d'agents spécialisés et assister son utilisateur")
-
-            response = (
-                f"Je suis {name}, {role}.\n\n"
-                f"Ma mission est de {mission}.\n\n"
-                "Je ne suis pas un simple chatbot : je suis le noyau d'orchestration de ton assistant personnel, "
-                "chargé de comprendre tes demandes, router vers les bons modules, superviser les agents et exécuter les capacités disponibles."
+            from core.modules.identity import (
+                build_identity_response_async,
+                detect_identity_intent,
             )
 
-            return {
-                "response": response,
-                "intent": Intent.IDENTITY_QUERY.value,
-                "agent": "identity_provider",
-                "confidence": "high",
-            }
+            identity_result = detect_identity_intent(query)
+            kind = identity_result.get("kind") or "identity"
+            return await build_identity_response_async(kind, question=query)
 
         if intent == Intent.SELF_STATUS:
             from agents.runtime.runtime import get_agent_runtime
@@ -591,7 +604,7 @@ class AgentRouter:
             return await _build_tracked_agent(query, source_channel=source_channel)
 
         if intent == Intent.PROJECT_STATUS:
-            return _project_status_text(query)
+            return await _project_status_text(query)
 
         if intent == Intent.PROJECT_LIST:
             return _project_list_text()
