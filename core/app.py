@@ -63,6 +63,10 @@ from pydantic import BaseModel, Field
 
 from agents.builtin.base_agent import get_logger
 from core.api.auth import verify_api_key
+from core.infrastructure.event_bus import event_bus as infrastructure_event_bus
+from core.infrastructure.health import health_state
+from core.infrastructure.logging import log_event
+from core.infrastructure.registry import service_registry
 
 # DEV
 from agents.builtin.dev.code_agent.agent import CodeAgent
@@ -305,6 +309,7 @@ async def lifespan(app: FastAPI):
 
     try:
         _startup_time = time.monotonic()
+        health_state.mark_started()
         logger.info(json.dumps({"event": "startup", "version": VERSION}))
         register_default_subscribers()
 
@@ -627,6 +632,25 @@ class CoreResponse(BaseModel):
     metadata:          dict          = Field(default_factory=dict)
 
 
+class EventPublishInput(BaseModel):
+    event_type: str = Field(min_length=1)
+    source: str = Field(min_length=1)
+    payload: dict = Field(default_factory=dict)
+    target: Optional[str] = None
+    trace_id: Optional[str] = None
+
+
+class ServiceRegisterInput(BaseModel):
+    service_name: str = Field(min_length=1)
+    host: str = Field(min_length=1)
+    port: int = Field(ge=1, le=65_535)
+    version: Optional[str] = None
+
+
+class ServiceHeartbeatInput(BaseModel):
+    service_name: str = Field(min_length=1)
+
+
 # ── Routes systeme ────────────────────────────────────────────────────────────
 
 @app.get("/")
@@ -640,15 +664,74 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "healthy", "version": VERSION}
+    return health_state.health(VERSION)
 
 
 @app.get("/status")
 def status():
-    try:
-        return world_model.get()
-    except Exception as e:
-        raise HTTPException(500, f"Impossible de recuperer le status : {e}")
+    return health_state.status(
+        VERSION,
+        dependencies={},
+        registry=service_registry.status(),
+        event_bus=infrastructure_event_bus.status(),
+    )
+
+
+@app.get("/events")
+def list_infrastructure_events(limit: int = 100):
+    limit = min(max(0, limit), 1_000)
+    events = infrastructure_event_bus.get_events(limit)
+    return {"events": events, "count": len(events)}
+
+
+@app.post("/events/publish")
+def publish_infrastructure_event(input_data: EventPublishInput):
+    event = infrastructure_event_bus.publish(
+        event_type=input_data.event_type,
+        source=input_data.source,
+        payload=input_data.payload,
+        target=input_data.target,
+        trace_id=input_data.trace_id,
+    )
+    log_event(
+        service="core",
+        level="info",
+        message="infrastructure_event_published",
+        trace_id=event["trace_id"],
+        extra={"event_id": event["event_id"], "event_type": event["type"]},
+    )
+    return event
+
+
+@app.get("/registry/services")
+def list_registered_services():
+    services = service_registry.list_services()
+    return {"services": services, "count": len(services)}
+
+
+@app.post("/registry/register")
+def register_service(input_data: ServiceRegisterInput):
+    service = service_registry.register(
+        service_name=input_data.service_name,
+        host=input_data.host,
+        port=input_data.port,
+        version=input_data.version,
+    )
+    log_event(
+        service="core",
+        level="info",
+        message="service_registered",
+        extra={"service_name": input_data.service_name},
+    )
+    return service
+
+
+@app.post("/registry/heartbeat")
+def heartbeat_service(input_data: ServiceHeartbeatInput):
+    service = service_registry.heartbeat(input_data.service_name)
+    if service is None:
+        raise HTTPException(status_code=404, detail="Service not registered")
+    return service
 
 
 @app.get("/metrics")

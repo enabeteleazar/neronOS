@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 
-DEFAULT_IDENTITY_PATH = Path("/etc/neron/memory/obsidian/identity/NERON.md")
+DEFAULT_IDENTITY_PATH = Path("/etc/neron/server/memory/obsidian/identity/NERON.md")
 
 
 class IdentityError(RuntimeError):
