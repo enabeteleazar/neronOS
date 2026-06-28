@@ -6,7 +6,7 @@ from pathlib import Path
 from .schemas import MemoryRecord
 from .text_utils import normalize_text
 
-DEFAULT_DB = "/etc/neron/memory/neron_memory.db"
+DEFAULT_DB = "/etc/neron/server/memory/neron_memory.db"
 
 
 class SQLiteMemoryAdapter:

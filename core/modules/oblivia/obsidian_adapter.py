@@ -5,7 +5,7 @@ from pathlib import Path
 from .schemas import MemoryRecord
 from .text_utils import normalize_text
 
-DEFAULT_VAULT = "/etc/neron/memory/obsidian"
+DEFAULT_VAULT = "/etc/neron/server/memory/obsidian"
 
 
 class ObsidianMemoryAdapter:
