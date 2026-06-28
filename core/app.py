@@ -638,6 +638,7 @@ class EventPublishInput(BaseModel):
     payload: dict = Field(default_factory=dict)
     target: Optional[str] = None
     trace_id: Optional[str] = None
+    level: str = Field(default="info", pattern="^(info|warning|error)$")
 
 
 class ServiceRegisterInput(BaseModel):
@@ -678,9 +679,21 @@ def status():
 
 
 @app.get("/events")
-def list_infrastructure_events(limit: int = 100):
+def list_infrastructure_events(
+    limit: int = 100,
+    event_type: Optional[str] = None,
+    source: Optional[str] = None,
+    target: Optional[str] = None,
+    trace_id: Optional[str] = None,
+):
     limit = min(max(0, limit), 1_000)
-    events = infrastructure_event_bus.get_events(limit)
+    events = infrastructure_event_bus.get_events(
+        limit,
+        event_type=event_type,
+        source=source,
+        target=target,
+        trace_id=trace_id,
+    )
     return {"events": events, "count": len(events)}
 
 
@@ -692,6 +705,7 @@ def publish_infrastructure_event(input_data: EventPublishInput):
         payload=input_data.payload,
         target=input_data.target,
         trace_id=input_data.trace_id,
+        level=input_data.level,
     )
     log_event(
         service="core",
