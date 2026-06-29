@@ -4,6 +4,7 @@ import logging
 
 from .llm import LLMProvider
 from .memory import ObliviaProvider
+from .weather import WeatherProvider
 from .registry import ProviderRegistry, provider_registry
 
 logger = logging.getLogger("core.providers")
@@ -21,5 +22,9 @@ def ensure_default_providers(
     if registry.get("llm") is None:
         registry.register(LLMProvider())
         logger.info("Provider registered: llm")
+
+    if registry.get("open_meteo") is None:
+        registry.register(WeatherProvider())
+        logger.info("Provider registered: open_meteo")
 
     return registry

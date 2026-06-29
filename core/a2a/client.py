@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from threading import RLock
-from typing import Iterable
+from typing import Any, Awaitable, Callable, Iterable
 
 from .models import AgentCard, AgentResponse, AgentTask
 
@@ -12,12 +12,23 @@ class A2AClient:
     def __init__(self, agents: Iterable[AgentCard] | None = None) -> None:
         self._lock = RLock()
         self._agents: dict[str, AgentCard] = {}
+        self._handlers: dict[str, Callable[[AgentTask], Any | Awaitable[Any]]] = {}
         for agent in agents or []:
             self.register_agent(agent)
 
     def register_agent(self, card: AgentCard) -> AgentCard:
         with self._lock:
             self._agents[card.agent_id] = card
+        return card
+
+    def register_handler(
+        self,
+        card: AgentCard,
+        handler: Callable[[AgentTask], Any | Awaitable[Any]],
+    ) -> AgentCard:
+        self.register_agent(card)
+        with self._lock:
+            self._handlers[card.agent_id] = handler
         return card
 
     def get_agent(self, agent_id: str) -> AgentCard | None:
@@ -45,6 +56,21 @@ class A2AClient:
                 agent_id=task.target_agent,
                 status="failed",
                 error="agent not found",
+                trace_id=task.trace_id,
+            )
+        with self._lock:
+            handler = self._handlers.get(agent.agent_id)
+        if handler is not None:
+            result = handler(task)
+            if hasattr(result, "__await__"):
+                result = await result
+            if isinstance(result, AgentResponse):
+                return result
+            return AgentResponse(
+                task_id=task.task_id,
+                agent_id=agent.agent_id,
+                status="completed",
+                result=dict(result or {}),
                 trace_id=task.trace_id,
             )
 

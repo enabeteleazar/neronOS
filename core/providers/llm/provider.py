@@ -129,7 +129,11 @@ class LLMProvider(ProviderProtocol):
         }
         async with httpx.AsyncClient(
             base_url=self._base_url,
-            timeout=httpx.Timeout(self._timeout),
+            timeout=httpx.Timeout(
+                max(self._timeout, 360.0)
+                if task_type in {"code", "agent"}
+                else self._timeout
+            ),
             headers=self._headers(),
         ) as client:
             response = await client.post("/llm/generate", json=payload)

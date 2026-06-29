@@ -18,6 +18,9 @@ class AgentCard(BaseModel):
     name: str = Field(min_length=1)
     endpoint: str | None = None
     capabilities: list[str] = Field(default_factory=list)
+    description: str = ""
+    tags: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     status: Literal["available", "unavailable", "unknown"] = "unknown"
 
 

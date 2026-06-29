@@ -25,6 +25,7 @@ from core.modules.status import (
 from core.modules.memory import detect_memory_intent, build_memory_response_async
 from core.infrastructure.registry import service_registry
 from core.infrastructure.topology import build_topology
+from core.goal_engine import GoalRequest, goal_engine
 from core.providers.models import ProviderRequest
 from core.providers.registry import provider_registry
 
@@ -93,6 +94,7 @@ class CoreOrchestrator:
         goal_orchestrator_factory: Any | None = None,
         goal_execution_engine: Any | None = None,
         goal_background_runner: Any | None = None,
+        goal_engine_instance: Any | None = None,
         runtime_governor: Any | None = None,
         agent_runtime_factory: Any | None = None,
     ) -> None:
@@ -102,6 +104,7 @@ class CoreOrchestrator:
         self._goal_orchestrator_factory = goal_orchestrator_factory
         self._goal_execution_engine = goal_execution_engine
         self._goal_background_runner = goal_background_runner
+        self._goal_engine = goal_engine_instance
         self._runtime_governor = runtime_governor
         self._agent_runtime_factory = agent_runtime_factory
 
@@ -225,6 +228,24 @@ class CoreOrchestrator:
                 requires_goal_pipeline=False,
                 requires_governor=False,
             )
+        elif intent in {Intent.AGENT_CREATION, Intent.TOOL_CREATION}:
+            decision = OrchestratorDecision(
+                intent=intent.value,
+                selected_route="goal_engine",
+                reason="Objectif de création délégué au Goal Engine foundation.",
+                complexity="complex",
+                requires_goal_pipeline=True,
+                requires_governor=True,
+            )
+        elif _is_goal_engine_request(normalized):
+            decision = OrchestratorDecision(
+                intent="goal_execution",
+                selected_route="goal_engine",
+                reason="Demande explicite d'exécution par agent déléguée au Goal Engine.",
+                complexity="complex",
+                requires_goal_pipeline=True,
+                requires_governor=True,
+            )
         elif status_result.get("matched") or intent == Intent.SYSTEM_STATUS:
             decision = OrchestratorDecision(
                 intent="status_query",
@@ -282,20 +303,11 @@ class CoreOrchestrator:
                 requires_memory=True,
                 requires_llm=False,
             )
-        elif intent in {Intent.AGENT_CREATION, Intent.TOOL_CREATION}:
-            decision = OrchestratorDecision(
-                intent=intent.value,
-                selected_route="goal_pipeline",
-                reason="Création explicite déléguée au Goal Engine, autorité canonique du pipeline de construction.",
-                complexity="complex",
-                requires_goal_pipeline=True,
-                requires_governor=True,
-            )
         elif _requires_goal_pipeline(normalized):
             decision = OrchestratorDecision(
                 intent=intent.value,
-                selected_route="goal_pipeline",
-                reason="Demande complexe de construction ou d'exécution structurée déléguée au Goal Engine.",
+                selected_route="goal_engine",
+                reason="Objectif d'exécution structurée délégué au Goal Engine foundation.",
                 complexity="complex",
                 requires_goal_pipeline=True,
                 requires_governor=True,
@@ -569,6 +581,21 @@ class CoreOrchestrator:
                 fallback,
             )
             return response, executor, {**metadata, "resolver_fallback": True}
+
+        if route == "goal_engine":
+            self._log_used("goal_engine_used", decision)
+            goal_request = GoalRequest(
+                objective=query,
+                source=source_channel,
+                user_id=user_id,
+                metadata=request_metadata,
+            )
+            result = await self._get_goal_engine().execute(goal_request)
+            return (
+                result.response,
+                "goal_engine",
+                result.to_orchestrator_metadata(),
+            )
 
         if route == "goal_pipeline":
             self._log_used("goal_pipeline_used", decision)
@@ -1073,6 +1100,11 @@ class CoreOrchestrator:
             self._goal_background_runner = get_goal_background_runner()
         return self._goal_background_runner
 
+    def _get_goal_engine(self) -> Any:
+        if self._goal_engine is None:
+            self._goal_engine = goal_engine
+        return self._goal_engine
+
     def _get_agent_runtime(self) -> Any:
         if self._agent_runtime_factory is None:
             from agents.runtime.runtime import get_agent_runtime
@@ -1430,6 +1462,19 @@ def _requires_goal_pipeline(query: str) -> bool:
             "construis ",
             "construire ",
             "construction ",
+        )
+    )
+
+
+def _is_goal_engine_request(query: str) -> bool:
+    return any(
+        token in query
+        for token in (
+            "utilise un agent",
+            "utilise l agent",
+            "utiliser un agent",
+            "agent de diagnostic",
+            "prepare un plan pour creer un agent",
         )
     )
 
