@@ -74,6 +74,7 @@ from core.infrastructure.gateway import GatewayError, proxy_request
 from core.infrastructure.health import health_state
 from core.infrastructure.logging import log_event
 from core.infrastructure.registry import ServiceRegistration, service_registry
+from core.infrastructure.topology import build_topology, get_topology_service
 
 # DEV
 from agents.builtin.dev.code_agent.agent import CodeAgent
@@ -748,6 +749,19 @@ def list_registered_services(
         capability=capability,
     )
     return {"services": services, "count": len(services)}
+
+
+@app.get("/registry/topology")
+def registry_topology():
+    return build_topology(service_registry)
+
+
+@app.get("/registry/topology/{service_name}")
+def registry_topology_service(service_name: str):
+    service = get_topology_service(service_registry, service_name)
+    if service is None:
+        raise HTTPException(status_code=404, detail="Service not registered")
+    return service
 
 
 @app.get("/registry/services/{service_name}", response_model=ServiceRegistration)
