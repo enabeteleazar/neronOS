@@ -305,11 +305,32 @@ metrics = Metrics()
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 
+
+
+async def _registry_stale_loop() -> None:
+    timeout_seconds = float(os.getenv("NERON_REGISTRY_STALE_TIMEOUT_SECONDS", "90"))
+    interval_seconds = float(os.getenv("NERON_REGISTRY_STALE_INTERVAL_SECONDS", "30"))
+
+    while True:
+        try:
+            stale = service_registry.mark_stale_services(timeout_seconds)
+            if stale:
+                logger.warning(
+                    "Registry stale services: %s",
+                    ", ".join(s["service_name"] for s in stale),
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Registry stale loop error: %s", exc)
+
+        await asyncio.sleep(interval_seconds)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global llm_agent, web_agent, stt_agent, tts_agent, ha_agent
     global router, _startup_time, memory_agent
-    global code_agent, code_audit_agent, _gateway_task, _self_monitor_task
+    global code_agent, code_audit_agent, _gateway_task, _self_monitor_task, _registry_stale_task
     global obsidian_agent, autonomous_planner_agent
 
     telegram_enabled = False
@@ -483,10 +504,23 @@ async def lifespan(app: FastAPI):
             await start_watchdog()
             await start_watchdog_bot()
 
+        _registry_stale_task = asyncio.create_task(_registry_stale_loop())
+        logger.info("Registry stale detector demarre")
+
         yield
 
     finally:
         logger.info(json.dumps({"event": "shutdown_started"}))
+
+        if _registry_stale_task and not _registry_stale_task.done():
+            _registry_stale_task.cancel()
+            try:
+                await _registry_stale_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.warning("Erreur arrêt Registry stale detector : %s", e)
+
 
         try:
             from goal.goals.background_runner import get_goal_background_runner
@@ -1015,7 +1049,8 @@ async def text_input_stream(input_data: TextInput, _: None = Depends(verify_api_
             )
         except Exception as e:
             logger.exception("stream: exception : %s", e)
-            yield f"data: {json.dumps({'token': '', 'done': True, 'error': str(e)})}\n\n"
+
+        yield f"data: {json.dumps({'token': '', 'done': True, 'error': str(e)})}\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
