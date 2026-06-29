@@ -23,6 +23,7 @@ KIND_RESPONSE_LIMITS = {
     "architecture_summary": {"max_sentences": 5, "max_chars": 760},
     "architecture_detailed": {"max_sentences": None, "max_chars": 1500},
     "identity_full": {"max_sentences": None, "max_chars": 1900},
+    "version": {"max_sentences": None, "max_chars": 240},
 }
 
 COMPLETE_OPERATIONAL_PIPELINE = (
@@ -159,11 +160,21 @@ def _question_for_kind(kind: str) -> str:
         return "Explique ton architecture"
     if normalized == "identity_full":
         return "Décris-toi complètement"
+    if normalized == "version":
+        return "Quelle est ta version ?"
     return "Qui es-tu ?"
 
 
 def _fallback_identity(kind: str = "identity", has_identity_source: bool = False) -> str:
     normalized = _normalize_kind(kind)
+
+    if normalized == "version":
+        version_path = Path(__file__).resolve().parents[2] / "VERSION"
+        try:
+            version = version_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            version = "inconnue"
+        return f"Je suis NéronOS Core version {version}."
 
     if normalized == "mission":
         return (
@@ -229,6 +240,8 @@ def _length_instruction(kind: str) -> str:
         )
     if normalized == "identity_full":
         return "Réponds en version longue reformulée. Utilise le contexte sans copier-coller brut."
+    if normalized == "version":
+        return "Réponds en une phrase avec la version locale du Core."
     return "Réponds clairement et brièvement."
 
 

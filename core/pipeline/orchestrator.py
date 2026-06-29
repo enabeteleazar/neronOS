@@ -23,6 +23,8 @@ from core.modules.status import (
     detect_status_intent,
 )
 from core.modules.memory import detect_memory_intent, build_memory_response_async
+from core.infrastructure.registry import service_registry
+from core.infrastructure.topology import build_topology
 
 logger = get_logger("core.pipeline.orchestrator")
 
@@ -163,6 +165,48 @@ class CoreOrchestrator:
                 reason="Demande de modèle interne traitée par le SelfModel local.",
                 complexity="simple",
                 requires_tool=True,
+            )
+        elif intent == Intent.REGISTRY_LIST:
+            decision = OrchestratorDecision(
+                intent=Intent.REGISTRY_LIST.value,
+                selected_route="registry_provider",
+                reason="Demande de liste des services traitée localement par le registre.",
+                complexity="simple",
+                requires_llm=False,
+                requires_timer=False,
+                requires_memory=False,
+                requires_tool=False,
+                requires_resolver=False,
+                requires_goal_pipeline=False,
+                requires_governor=False,
+            )
+        elif intent == Intent.REGISTRY_STATUS:
+            decision = OrchestratorDecision(
+                intent=Intent.REGISTRY_STATUS.value,
+                selected_route="registry_provider",
+                reason="Demande d'etat des services (arrets/en cours) traitee localement par le registre.",
+                complexity="simple",
+                requires_llm=False,
+                requires_timer=False,
+                requires_memory=False,
+                requires_tool=False,
+                requires_resolver=False,
+                requires_goal_pipeline=False,
+                requires_governor=False,
+            )
+        elif intent == Intent.TOPOLOGY_SHOW:
+            decision = OrchestratorDecision(
+                intent=Intent.TOPOLOGY_SHOW.value,
+                selected_route="topology_provider",
+                reason="Demande de topologie du systeme traitee localement par le module de topologie.",
+                complexity="simple",
+                requires_llm=False,
+                requires_timer=False,
+                requires_memory=False,
+                requires_tool=False,
+                requires_resolver=False,
+                requires_goal_pipeline=False,
+                requires_governor=False,
             )
         elif status_result.get("matched") or intent == Intent.SYSTEM_STATUS:
             decision = OrchestratorDecision(
@@ -337,6 +381,20 @@ class CoreOrchestrator:
             error = str(exc)
             model = None
             response_intent = decision.intent
+
+        logger.info(
+            json.dumps(
+                {
+                    "event": "orchestrator_execution",
+                    "intent": decision.intent,
+                    "selected_route": decision.selected_route,
+                    "reason": decision.reason,
+                    "executor": executor,
+                    "requires_llm": decision.requires_llm,
+                },
+                ensure_ascii=False,
+            )
+        )
 
         return OrchestratorResult(
             response=response,
@@ -535,6 +593,14 @@ class CoreOrchestrator:
                     "routed_before_llm": True,
                 }
             return response, _executor_for_intent(intent_result.intent), {}
+        if route == "registry_provider":
+            self._log_used("registry_used", decision)
+            return await self._execute_registry(query, decision)
+
+        if route == "topology_provider":
+            self._log_used("topology_used", decision)
+            return await self._execute_topology(query, decision)
+
 
         self._log_used("llm_provider_used", decision)
         if decision.requires_memory:
@@ -718,6 +784,84 @@ class CoreOrchestrator:
         return result["response"], result["agent"], metadata
 
 
+    async def _execute_registry(
+        self,
+        query: str,
+        decision: OrchestratorDecision,
+    ) -> tuple[str, str, dict[str, Any]]:
+        """Handle registry queries."""
+        # Determine what the user wants
+        normalized = _normalize(query)
+        services = service_registry.list_services()
+        if not services:
+            response = "Aucun service enregistré."
+        else:
+            target = _registry_target(normalized)
+            if target is not None:
+                matching = [
+                    service
+                    for service in services
+                    if _service_matches_registry_target(service, target)
+                ]
+                if matching:
+                    service = matching[0]
+                    response = (
+                        f"Le service {service['service_name']} fournit {target} "
+                        f"(statut : {service.get('status', 'unknown')})."
+                    )
+                else:
+                    response = f"Aucun service enregistré ne fournit {target}."
+            # Check if user asks for stopped services
+            elif any(
+                k in normalized
+                for k in ["arrete", "hors ligne", "stop", "down"]
+            ):
+                stopped = [s for s in services if s.get("status") != "healthy"]
+                if not stopped:
+                    response = "Tous les services sont en cours d'exécution (healthy)."
+                else:
+                    lines = [f"- {s['service_name']} : {s.get('status', 'inconnu')}" for s in stopped]
+                    response = "Services arrêtés :\n" + "\n".join(lines)
+            else:
+                # Default: list all services with status
+                lines = [f"- {s['service_name']} : {s.get('status', 'inconnu')}" for s in services]
+                response = "Services enregistrés :\n" + "\n".join(lines)
+        metadata = {
+            "selected_route": "registry_provider",
+            "executor": "registry_module",
+            "fallback_used": False,
+            "retries": 0,
+        }
+        return response, "registry_module", metadata
+
+    async def _execute_topology(
+        self,
+        query: str,
+        decision: OrchestratorDecision,
+    ) -> tuple[str, str, dict[str, Any]]:
+        """Handle topology queries."""
+        topology = build_topology(service_registry)
+        status = topology.get("status", "inconnu")
+        service_count = topology.get("service_count", 0)
+        healthy = topology.get("healthy_count", 0)
+        degraded = topology.get("degraded_count", 0)
+        offline = topology.get("offline_count", 0)
+        # Build a friendly summary
+        lines = []
+        for svc in topology.get("services", []):
+            lines.append(f"- {svc['name']} ({svc['status']}) : {svc['host']}:{svc['port']}")
+        detail = "\n".join(lines) if lines else "Aucun service."
+        response = (f"Topologie du système :\n"
+                    f"État global : {status}\n"
+                    f"Services : {service_count} (sains : {healthy}, dégradés : {degraded}, hors ligne : {offline})\n"
+                    f"Détail :\n{detail}")
+        metadata = {
+            "selected_route": "topology_provider",
+            "executor": "topology_module",
+            "fallback_used": False,
+            "retries": 0,
+        }
+        return response, "topology_module", metadata
     def _get_capability_resolver(self) -> Any:
         if self._capability_resolver is None:
             from modules.capabilities.resolver import CapabilityResolver
@@ -831,6 +975,38 @@ def _normalize(text: str) -> str:
     return " ".join(
         normalized.replace("'", " ").replace("’", " ").replace("-", " ").split()
     )
+
+
+def _registry_target(normalized_query: str) -> str | None:
+    if "home assistant" in normalized_query:
+        return "Home Assistant"
+    if "memoire" in normalized_query:
+        return "la mémoire"
+    if re.search(r"\bllms?\b", normalized_query):
+        return "les LLM"
+    return None
+
+
+def _service_matches_registry_target(
+    service: dict[str, Any],
+    target: str,
+) -> bool:
+    name = str(service.get("service_name", "")).lower()
+    capabilities = {
+        str(capability).lower()
+        for capability in service.get("capabilities", [])
+    }
+    if target == "Home Assistant":
+        return name == "homeassistant" or "home_automation" in capabilities
+    if target == "la mémoire":
+        return name == "memory" or bool(
+            capabilities & {"memory", "sqlite", "obsidian", "context_storage"}
+        )
+    if target == "les LLM":
+        return name == "llm" or bool(
+            capabilities & {"text_generation", "chat", "completion"}
+        )
+    return False
 
 
 def _parse_agent_invocation(query: str) -> AgentInvocation | None:

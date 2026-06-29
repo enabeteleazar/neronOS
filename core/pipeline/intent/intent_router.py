@@ -39,6 +39,9 @@ class Intent(str, Enum):
     NETWORK_STATUS       = "network_status"
     IDENTITY_QUERY       = "identity_query"
     SELF_STATUS          = "self_status"
+    REGISTRY_LIST       = "registry_list"
+    REGISTRY_STATUS     = "registry_status"
+    TOPOLOGY_SHOW       = "topology_show"
 
     NEWS_QUERY           = "news_query"
     WEATHER_QUERY        = "weather_query"
@@ -398,6 +401,39 @@ def _fallback_intent(query: str) -> Intent | None:
 
     if any(k in q for k in news_keywords):
         return Intent.NEWS_QUERY
+
+    # Catalogue questions take precedence over action intents. Mentioning
+    # Home Assistant is not an HA action when asking which service owns it.
+    registry_status_keywords = [
+        "quels services sont arretes",
+        "services arretes",
+        "services hors ligne",
+        "services down",
+    ]
+    if any(k in q for k in registry_status_keywords):
+        return Intent.REGISTRY_STATUS
+
+    registry_keywords = [
+        "quels services sont enregistres",
+        "services enregistres",
+        "quel service fournit les llm",
+        "quel service fournit le llm",
+        "quel service gere home assistant",
+        "quel service gere la memoire",
+    ]
+    if any(k in q for k in registry_keywords):
+        return Intent.REGISTRY_LIST
+
+    topology_keywords = [
+        "montre moi la topologie",
+        "montre la topologie",
+        "topologie du systeme",
+        "affiche la topologie",
+        "voir la topologie",
+        "schema du systeme",
+    ]
+    if any(k in q for k in topology_keywords):
+        return Intent.TOPOLOGY_SHOW
 
     if any(k in q for k in ha_keywords):
         return Intent.HA_ACTION

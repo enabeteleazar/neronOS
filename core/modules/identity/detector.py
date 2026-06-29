@@ -40,6 +40,9 @@ def detect_identity_intent(text: str) -> dict:
         return {"matched": True, "kind": "architecture_detailed", "confidence": 0.95}
 
     architecture_summary_patterns = [
+        "quelle est ton architecture",
+        "quelle est l architecture de neron",
+        "ton architecture",
         "comment fonctionnes tu",
         "comment tu fonctionnes",
         "comment fonctionne neron",
@@ -53,6 +56,7 @@ def detect_identity_intent(text: str) -> dict:
         return {"matched": True, "kind": "architecture_summary", "confidence": 0.95}
 
     mission_patterns = [
+        "que fais tu",
         "ta mission",
         "ton role",
         "quelle est ta mission",
@@ -66,6 +70,16 @@ def detect_identity_intent(text: str) -> dict:
 
     if any(p in value for p in mission_patterns):
         return {"matched": True, "kind": "mission", "confidence": 0.95}
+
+    version_patterns = [
+        "quelle est ta version",
+        "quelle version es tu",
+        "version de neron",
+        "ta version",
+    ]
+
+    if any(p in value for p in version_patterns):
+        return {"matched": True, "kind": "version", "confidence": 0.95}
 
     identity_short_patterns = [
         "qui es tu",
