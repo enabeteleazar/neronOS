@@ -2,6 +2,13 @@
 
 from core.infrastructure.event_bus import Event, EventBus, EventLevel
 from core.infrastructure.health import HealthState
-from core.infrastructure.registry import ServiceRegistry
+from core.infrastructure.registry import ServiceRegistration, ServiceRegistry
 
-__all__ = ["Event", "EventBus", "EventLevel", "HealthState", "ServiceRegistry"]
+__all__ = [
+    "Event",
+    "EventBus",
+    "EventLevel",
+    "HealthState",
+    "ServiceRegistration",
+    "ServiceRegistry",
+]

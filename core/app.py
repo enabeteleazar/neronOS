@@ -66,7 +66,7 @@ from core.api.auth import verify_api_key
 from core.infrastructure.event_bus import event_bus as infrastructure_event_bus
 from core.infrastructure.health import health_state
 from core.infrastructure.logging import log_event
-from core.infrastructure.registry import service_registry
+from core.infrastructure.registry import ServiceRegistration, service_registry
 
 # DEV
 from agents.builtin.dev.code_agent.agent import CodeAgent
@@ -646,10 +646,29 @@ class ServiceRegisterInput(BaseModel):
     host: str = Field(min_length=1)
     port: int = Field(ge=1, le=65_535)
     version: Optional[str] = None
+    status: str = Field(
+        default="unknown",
+        pattern="^(healthy|degraded|unhealthy|unknown)$",
+    )
+    capabilities: list[str] = Field(default_factory=list)
+    metadata: dict = Field(default_factory=dict)
 
 
 class ServiceHeartbeatInput(BaseModel):
     service_name: str = Field(min_length=1)
+    status: Optional[str] = Field(
+        default=None,
+        pattern="^(healthy|degraded|unhealthy|unknown)$",
+    )
+    metadata: Optional[dict] = None
+
+
+def _service_registration_response(service: dict) -> ServiceRegistration:
+    """Rebuild the strict response model from the Registry wire format."""
+
+    payload = dict(service)
+    payload.pop("last_heartbeat", None)
+    return ServiceRegistration.model_validate(payload, strict=False)
 
 
 # ── Routes systeme ────────────────────────────────────────────────────────────
@@ -718,18 +737,35 @@ def publish_infrastructure_event(input_data: EventPublishInput):
 
 
 @app.get("/registry/services")
-def list_registered_services():
-    services = service_registry.list_services()
+def list_registered_services(
+    status: Optional[str] = None,
+    capability: Optional[str] = None,
+):
+    services = service_registry.list_services(
+        status=status,
+        capability=capability,
+    )
     return {"services": services, "count": len(services)}
 
 
-@app.post("/registry/register")
+@app.get("/registry/services/{service_name}", response_model=ServiceRegistration)
+def get_registered_service(service_name: str):
+    service = service_registry.get_service(service_name)
+    if service is None:
+        raise HTTPException(status_code=404, detail="Service not registered")
+    return _service_registration_response(service)
+
+
+@app.post("/registry/register", response_model=ServiceRegistration)
 def register_service(input_data: ServiceRegisterInput):
     service = service_registry.register(
         service_name=input_data.service_name,
         host=input_data.host,
         port=input_data.port,
         version=input_data.version,
+        status=input_data.status,
+        capabilities=input_data.capabilities,
+        metadata=input_data.metadata,
     )
     log_event(
         service="core",
@@ -737,15 +773,27 @@ def register_service(input_data: ServiceRegisterInput):
         message="service_registered",
         extra={"service_name": input_data.service_name},
     )
-    return service
+    return _service_registration_response(service)
 
 
-@app.post("/registry/heartbeat")
+@app.post("/registry/heartbeat", response_model=ServiceRegistration)
 def heartbeat_service(input_data: ServiceHeartbeatInput):
-    service = service_registry.heartbeat(input_data.service_name)
+    service = service_registry.heartbeat(
+        input_data.service_name,
+        status=input_data.status,
+        metadata=input_data.metadata,
+    )
     if service is None:
         raise HTTPException(status_code=404, detail="Service not registered")
-    return service
+    return _service_registration_response(service)
+
+
+@app.delete("/registry/services/{service_name}", response_model=ServiceRegistration)
+def unregister_service(service_name: str):
+    service = service_registry.unregister(service_name)
+    if service is None:
+        raise HTTPException(status_code=404, detail="Service not registered")
+    return _service_registration_response(service)
 
 
 @app.get("/metrics")
