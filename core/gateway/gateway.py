@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 import websockets
 from websockets.exceptions import ConnectionClosed
-from websockets.server import WebSocketServerProtocol
+from websockets.asyncio.server import ServerConnection
 
 from core.identity import build_identity_prompt
 
@@ -62,7 +62,7 @@ class GatewayConfig:
 class ConnectedClient:
     """Représente un client connecté au gateway."""
 
-    ws:            WebSocketServerProtocol
+    ws:            ServerConnection
     client_id:     str  = field(default_factory=lambda: str(uuid.uuid4())[:8])
     authenticated: bool = False
 
@@ -151,7 +151,7 @@ class NeronGateway:
 
     # ── Connexion client ────────────────────────────────────────────────────
 
-    async def _handle_client(self, ws: WebSocketServerProtocol) -> None:
+    async def _handle_client(self, ws: ServerConnection) -> None:
         """
         Gère le cycle de vie complet d'un client WebSocket.
 
@@ -506,7 +506,7 @@ class NeronGateway:
 
     # ── Helpers envoi ───────────────────────────────────────────────────────
 
-    async def _send(self, ws: WebSocketServerProtocol, payload: dict) -> None:
+    async def _send(self, ws: ServerConnection, payload: dict) -> None:
         """
         Sérialise et envoie un payload JSON au client.
 
@@ -542,7 +542,7 @@ class NeronGateway:
             return_exceptions=True,
         )
 
-    async def _safe_send(self, ws: WebSocketServerProtocol, msg: str) -> None:
+    async def _safe_send(self, ws: ServerConnection, msg: str) -> None:
         """
         Envoie une chaîne JSON déjà sérialisée en ignorant les déconnexions.
 
