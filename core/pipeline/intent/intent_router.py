@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unicodedata
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict
@@ -39,6 +40,7 @@ class Intent(str, Enum):
     NETWORK_STATUS       = "network_status"
     IDENTITY_QUERY       = "identity_query"
     SELF_STATUS          = "self_status"
+    MEMORY_SEARCH        = "memory_search"
     REGISTRY_LIST       = "registry_list"
     REGISTRY_STATUS     = "registry_status"
     TOPOLOGY_SHOW       = "topology_show"
@@ -348,6 +350,32 @@ def _fallback_intent(query: str) -> Intent | None:
         "adapte ton style",
         "parle autrement",
     ]
+
+    memory_search_prefixes = (
+        "recherche ",
+        "cherche ",
+        "retrouve ",
+    )
+    memory_search_keywords = [
+        "recherche dans ta memoire",
+        "cherche dans ta memoire",
+        "recherche memoire",
+        "qu as tu memorise sur",
+        "que sais tu sur",
+        "retrouve mes notes sur",
+    ]
+
+    for prefix in memory_search_prefixes:
+        if q.startswith(prefix):
+            target = q.removeprefix(prefix).strip()
+            if (
+                re.search(r"\bphase\s+\d+\b", target)
+                or target in {"oblivia", "sqlite", "goal engine"}
+            ):
+                return Intent.MEMORY_SEARCH
+
+    if any(k in q for k in memory_search_keywords):
+        return Intent.MEMORY_SEARCH
 
     if any(k in q for k in time_keywords):
         return Intent.TIME_QUERY

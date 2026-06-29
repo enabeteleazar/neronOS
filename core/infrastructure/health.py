@@ -47,6 +47,8 @@ class HealthState:
         dependencies: dict[str, Any] | None = None,
         registry: dict[str, Any] | None = None,
         event_bus: dict[str, Any] | None = None,
+        providers: dict[str, Any] | None = None,
+        a2a: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return {
             "service": "core",
@@ -57,6 +59,8 @@ class HealthState:
             "dependencies": dependencies or {},
             "registry": registry or {},
             "event_bus": event_bus or {},
+            "providers": providers or {},
+            "a2a": a2a or {},
         }
 
 

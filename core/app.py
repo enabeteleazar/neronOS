@@ -75,6 +75,8 @@ from core.infrastructure.health import health_state
 from core.infrastructure.logging import log_event
 from core.infrastructure.registry import ServiceRegistration, service_registry
 from core.infrastructure.topology import build_topology, get_topology_service
+from core.a2a import a2a_client
+from core.providers import ensure_default_providers, provider_registry
 
 # DEV
 from agents.builtin.dev.code_agent.agent import CodeAgent
@@ -341,6 +343,7 @@ async def lifespan(app: FastAPI):
         health_state.mark_started()
         logger.info(json.dumps({"event": "startup", "version": VERSION}))
         register_default_subscribers()
+        ensure_default_providers()
 
         try:
             from goal.goals.execution_engine import get_goal_execution_engine
@@ -724,13 +727,28 @@ def health():
     return health_state.health(VERSION)
 
 
+async def _refresh_provider_health() -> None:
+    for provider_info in provider_registry.list():
+        provider = provider_registry.get(provider_info.name)
+        if provider is None:
+            continue
+        try:
+            await provider.health()
+        except Exception as exc:
+            logger.warning("Provider health refresh failed for %s: %s", provider_info.name, exc)
+
+
 @app.get("/status")
-def status():
+async def status():
+    ensure_default_providers()
+    await _refresh_provider_health()
     return health_state.status(
         VERSION,
         dependencies={},
         registry=service_registry.status(),
         event_bus=infrastructure_event_bus.status(),
+        providers=provider_registry.status(),
+        a2a=a2a_client.status(),
     )
 
 

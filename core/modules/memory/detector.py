@@ -23,6 +23,8 @@ def detect_memory_intent(text: str) -> dict:
     ]
 
     recall_patterns = [
+        "que viens tu de memoriser",
+        "qu as tu memorise",
         "que sais tu",
         "que sais tu sur",
         "que sais tu de ta memoire",
