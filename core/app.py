@@ -46,7 +46,7 @@ from typing import Optional
 import psutil
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
     REGISTRY,
@@ -64,6 +64,7 @@ from pydantic import BaseModel, Field
 from agents.builtin.base_agent import get_logger
 from core.api.auth import verify_api_key
 from core.infrastructure.event_bus import event_bus as infrastructure_event_bus
+from core.infrastructure.gateway import GatewayError, proxy_request
 from core.infrastructure.health import health_state
 from core.infrastructure.logging import log_event
 from core.infrastructure.registry import ServiceRegistration, service_registry
@@ -796,9 +797,34 @@ def unregister_service(service_name: str):
     return _service_registration_response(service)
 
 
+@app.api_route(
+    "/gateway/{service_name}/{path:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+)
+async def gateway_proxy(service_name: str, path: str, request: Request):
+    try:
+        proxied = await proxy_request(
+            service_name=service_name,
+            path=path,
+            method=request.method,
+            headers=request.headers,
+            body=await request.body(),
+            query_params=list(request.query_params.multi_items()),
+        )
+    except GatewayError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+    response_headers = dict(proxied.headers)
+    response_headers["X-Neron-Trace-Id"] = proxied.trace_id
+    return Response(
+        content=proxied.content,
+        status_code=proxied.status_code,
+        headers=response_headers,
+    )
+
+
 @app.get("/metrics")
 def prometheus_metrics():
-    from fastapi.responses import Response
     return Response(content=metrics.export(), media_type=CONTENT_TYPE_LATEST)
 
 
