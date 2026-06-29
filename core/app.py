@@ -35,7 +35,6 @@ logger.info("Booting Néron Core...")
 # =========================
 
 import asyncio
-import hmac
 import json
 import os
 import time
@@ -63,6 +62,13 @@ from pydantic import BaseModel, Field
 
 from agents.builtin.base_agent import get_logger
 from core.api.auth import verify_api_key
+from core.infrastructure.auth import (
+    AuthenticationError,
+    authenticate_request,
+    is_public_route,
+    publish_auth_failure,
+    publish_auth_success,
+)
 from core.infrastructure.event_bus import event_bus as infrastructure_event_bus
 from core.infrastructure.gateway import GatewayError, proxy_request
 from core.infrastructure.health import health_state
@@ -556,33 +562,28 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-PUBLIC_API_PATHS = frozenset({"/health"})
-
-
 @app.middleware("http")
 async def enforce_api_key(request: Request, call_next):
-    if request.method == "OPTIONS" or request.url.path in PUBLIC_API_PATHS:
+    if request.method == "OPTIONS" or is_public_route(
+        request.method,
+        request.url.path,
+    ):
         return await call_next(request)
 
-    configured_key = str(settings.API_KEY or "").strip()
-    if not configured_key or configured_key == "changez_moi":
+    try:
+        context = authenticate_request(request)
+    except AuthenticationError as exc:
+        publish_auth_failure(request, exc)
         return JSONResponse(
-            status_code=503,
-            content={"detail": "Authentification API non configurée"},
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
         )
 
-    supplied_key = request.headers.get("X-API-Key")
-    if not supplied_key:
-        return JSONResponse(
-            status_code=401,
-            content={"detail": "API Key manquante"},
-        )
-    if not hmac.compare_digest(supplied_key, configured_key):
-        return JSONResponse(
-            status_code=403,
-            content={"detail": "API Key invalide"},
-        )
-    return await call_next(request)
+    request.state.auth = context
+    try:
+        return await call_next(request)
+    finally:
+        publish_auth_success(request, context)
 
 
 app.include_router(self_model_router)
