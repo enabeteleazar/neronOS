@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from core.api.self_model_context_routes import router as self_model_router
+from core.api.selfmodel_routes import router as selfmodel_router
 from core.api.runtime_governor_routes import router as runtime_governor_router
 from core.api.world_model_routes import router as world_model_router
 from goal.goals.routes import router as goals_router
@@ -625,6 +626,7 @@ async def enforce_api_key(request: Request, call_next):
 
 
 app.include_router(self_model_router)
+app.include_router(selfmodel_router)
 app.include_router(runtime_governor_router)
 app.include_router(world_model_router)
 app.include_router(goals_router)

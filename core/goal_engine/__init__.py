@@ -11,6 +11,7 @@ from .agent_factory import (
 )
 from .engine import GoalEngine, goal_engine
 from .execution_loop import GoalExecutionLoop, GoalLoopResult, LoopState
+from .self_model_client import SelfModelClient, SelfModelGoalContext, self_model_client
 from .builtin_agents import DIAGNOSTIC_AGENT_CARD, diagnostic_agent_handler
 from .models import (
     GoalAnalysis,
@@ -43,6 +44,9 @@ __all__ = [
     "GoalExecutionLoop",
     "GoalLoopResult",
     "LoopState",
+    "SelfModelClient",
+    "SelfModelGoalContext",
+    "self_model_client",
     "DIAGNOSTIC_AGENT_CARD",
     "diagnostic_agent_handler",
 ]

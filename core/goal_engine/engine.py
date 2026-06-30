@@ -11,6 +11,7 @@ from core.providers.registry import ProviderRegistry, provider_registry
 from .agent_registry import AgentRegistry, agent_registry
 from .agent_factory import AgentCreationRequest, AgentFactory, agent_factory
 from .execution_loop import GoalExecutionLoop
+from .self_model_client import SelfModelClient, self_model_client
 from .models import (
     GoalAnalysis,
     GoalEngineResult,
@@ -39,12 +40,14 @@ class GoalEngine:
         agents: AgentRegistry = agent_registry,
         factory: AgentFactory = agent_factory,
         execution_loop: GoalExecutionLoop | None = None,
+        selfmodel: SelfModelClient = self_model_client,
     ) -> None:
         self.providers = providers
         self.a2a = a2a
         self.agents = agents
         self.factory = factory
         self.execution_loop = execution_loop or GoalExecutionLoop()
+        self.selfmodel = selfmodel
 
     async def execute(self, goal_request: GoalRequest) -> GoalEngineResult:
         analysis = await self.analyze(goal_request)
@@ -141,6 +144,18 @@ class GoalEngine:
                 "provider_memory_used": memory_learned,
                 "agent_creation_artifacts": creation_artifacts,
                 "agent_generation_error": generation_error,
+                "selfmodel_used": analysis.metadata.get("selfmodel_used", False),
+                "selfmodel_available": analysis.metadata.get("selfmodel_available", False),
+                "selfmodel_error": analysis.metadata.get("selfmodel_error"),
+                "selected_provider_from_selfmodel": analysis.metadata.get(
+                    "selected_provider_from_selfmodel"
+                ),
+                "selected_agent_from_selfmodel": analysis.metadata.get(
+                    "selected_agent_from_selfmodel"
+                ),
+                "selfmodel_decision_reason": analysis.metadata.get(
+                    "selfmodel_decision_reason"
+                ),
             },
         )
 
@@ -149,6 +164,20 @@ class GoalEngine:
         normalized = _normalize(objective)
         capabilities = _capabilities_for_goal(normalized)
         complexity = _complexity(objective)
+        selfmodel_context = await self.selfmodel.load()
+        selected_agent = _select_agent_from_selfmodel(
+            selfmodel_context.agents,
+            capabilities,
+        )
+        selected_provider = _select_provider_from_selfmodel(
+            selfmodel_context.providers,
+            capabilities,
+        )
+        reason = _selfmodel_decision_reason(
+            selected_agent,
+            selected_provider,
+            selfmodel_context.available,
+        )
         return GoalAnalysis(
             goal_id=goal_request.goal_id,
             objective=objective,
@@ -159,10 +188,27 @@ class GoalEngine:
             metadata={
                 "analysis_mode": "rule_based_foundation",
                 "source": goal_request.source,
+                "selfmodel_used": True,
+                "selfmodel_available": selfmodel_context.available,
+                "selfmodel_error": selfmodel_context.error,
+                "selected_provider_from_selfmodel": selected_provider,
+                "selected_agent_from_selfmodel": selected_agent,
+                "selfmodel_decision_reason": reason,
+                "selfmodel_context": selfmodel_context.model_dump(mode="json"),
             },
         )
 
     def find_agent(self, goal_analysis: GoalAnalysis) -> AgentCard | None:
+        selected_id = goal_analysis.metadata.get("selected_agent_from_selfmodel")
+        if selected_id:
+            selected = self.a2a.get_agent(str(selected_id)) or self.agents.get(str(selected_id))
+            if selected is not None and selected.status == "available":
+                return selected
+        elif goal_analysis.metadata.get("selfmodel_available"):
+            # The canonical SelfModel has an authoritative, current agent view.
+            return None
+
+        # Explicit fallback when the SelfModel is unavailable or its view is stale.
         self.agents.load_existing_agents()
         agent = self.agents.find_for_goal(goal_analysis)
         if agent is not None and self.a2a.get_agent(agent.agent_id) is None:
@@ -321,9 +367,21 @@ class GoalEngine:
         return None
 
     async def learn(self, goal_result: GoalExecutionResult) -> bool:
-        providers = self.providers.by_type("memory")
-        provider_info = providers[0] if providers else None
-        provider = self.providers.get(provider_info.name) if provider_info else None
+        memory_view = (
+            goal_result.plan.analysis.metadata
+            .get("selfmodel_context", {})
+            .get("memory", {})
+        )
+        provider_name = (
+            (memory_view.get("provider") or {}).get("name")
+            if isinstance(memory_view, dict)
+            else None
+        )
+        provider = self.providers.get(str(provider_name)) if provider_name else None
+        if provider is None:
+            providers = self.providers.by_type("memory")
+            provider_info = providers[0] if providers else None
+            provider = self.providers.get(provider_info.name) if provider_info else None
         if provider is None:
             logger.info("goal_engine_memory_provider_unavailable goal_id=%s", goal_result.goal_id)
             return False
@@ -428,6 +486,69 @@ def _capabilities_for_goal(normalized: str) -> list[str]:
         capabilities.update(word for word in words if len(word) > 5)
 
     return sorted(capabilities or {"generic"})
+
+
+def _select_agent_from_selfmodel(
+    agents_view: dict[str, Any],
+    required_capabilities: list[str],
+) -> str | None:
+    wanted = set(required_capabilities) - {"agent_creation", "planning"}
+    candidates: list[dict[str, Any]] = []
+    for section in ("a2a", "registry"):
+        payload = agents_view.get(section) or {}
+        candidates.extend(
+            item for item in payload.get("agents", [])
+            if isinstance(item, dict)
+        )
+    ranked: list[tuple[int, str]] = []
+    for agent in candidates:
+        if agent.get("status") != "available":
+            continue
+        capabilities = set(agent.get("capabilities") or [])
+        score = len(wanted & capabilities)
+        if score:
+            ranked.append((score, str(agent.get("agent_id") or "")))
+    if not ranked:
+        return None
+    ranked.sort(key=lambda item: (-item[0], item[1] != "open_meteo", item[1]))
+    return ranked[0][1] or None
+
+
+def _select_provider_from_selfmodel(
+    providers_view: dict[str, Any],
+    required_capabilities: list[str],
+) -> str | None:
+    required = set(required_capabilities)
+    requested_actions = set(required)
+    if "memory" in required:
+        requested_actions.update({"remember", "recall", "search"})
+    if "text_generation" in required:
+        requested_actions.add("generate")
+    ranked: list[tuple[int, str]] = []
+    for provider in providers_view.get("providers", []):
+        if not isinstance(provider, dict):
+            continue
+        score = len(requested_actions & set(provider.get("capabilities") or []))
+        if score:
+            ranked.append((score, str(provider.get("name") or "")))
+    if not ranked:
+        return None
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+    return ranked[0][1] or None
+
+
+def _selfmodel_decision_reason(
+    agent: str | None,
+    provider: str | None,
+    available: bool,
+) -> str:
+    if not available:
+        return "SelfModel indisponible : fallback local contrôlé."
+    if agent:
+        return f"Agent {agent} sélectionné depuis les capacités A2A exposées par SelfModel."
+    if provider:
+        return f"Provider {provider} sélectionné depuis les capacités exposées par SelfModel."
+    return "Aucun agent ou provider compatible déclaré par SelfModel."
 
 
 from .builtin_agents import install_builtin_agents

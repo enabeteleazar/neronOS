@@ -52,16 +52,218 @@ def _safe_identity() -> dict[str, Any]:
 
 def _safe_memory_status() -> dict[str, Any]:
     try:
-        from core.modules.oblivia.manager import ObliviaMemoryManager
+        from core.providers.registry import provider_registry
 
-        status = ObliviaMemoryManager().status()
-        if hasattr(status, "model_dump"):
-            return status.model_dump()
-        if hasattr(status, "dict"):
-            return status.dict()
-        return dict(status)
+        providers = provider_registry.by_type("memory")
+        if not providers:
+            return {"ok": False, "status": "unavailable", "provider": None}
+        provider = _normalize_provider(providers[0].model_dump(mode="json"))
+        return {
+            "ok": provider["status"] in {"healthy", "degraded"},
+            "status": provider["status"],
+            "provider": provider,
+            "source": "provider_registry",
+        }
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+def _safe_providers() -> dict[str, Any]:
+    try:
+        from core.providers.registry import provider_registry
+
+        payload = provider_registry.status()
+        providers = [
+            _normalize_provider(provider)
+            for provider in payload.get("providers", [])
+        ]
+        payload["providers"] = providers
+        payload["by_name"] = {
+            provider["name"]: provider for provider in providers
+        }
+        return payload
+    except Exception as exc:
+        return {"count": 0, "providers": [], "capabilities": [], "error": str(exc)}
+
+
+def _safe_a2a() -> dict[str, Any]:
+    try:
+        from core.a2a import a2a_client
+
+        payload = a2a_client.status()
+        payload["agents"] = [
+            _normalize_agent(agent, default_manager="a2a")
+            for agent in payload.get("agents", [])
+        ]
+        return payload
+    except Exception as exc:
+        return {"available": False, "agent_count": 0, "agents": [], "error": str(exc)}
+
+
+def _safe_agents() -> dict[str, Any]:
+    try:
+        from core.goal_engine import agent_registry
+
+        agent_registry.load_existing_agents()
+        payload = agent_registry.status()
+        payload["agents"] = [
+            _normalize_agent(agent, default_manager="agent_registry")
+            for agent in payload.get("agents", [])
+        ]
+        return payload
+    except Exception as exc:
+        return {"count": 0, "available_count": 0, "agents": [], "error": str(exc)}
+
+
+def _safe_registered_services() -> dict[str, Any]:
+    try:
+        from core.infrastructure.registry import service_registry
+
+        services = service_registry.list_services()
+        return {
+            "count": len(services),
+            "services": services,
+            "source": "service_registry",
+        }
+    except Exception as exc:
+        return {"count": 0, "services": [], "source": "service_registry", "error": str(exc)}
+
+
+def _safe_goal_engine() -> dict[str, Any]:
+    try:
+        from core.goal_engine import goal_engine
+
+        return goal_engine.status()
+    except Exception as exc:
+        return {"status": "unavailable", "error": str(exc)}
+
+
+def _normalize_provider(provider: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **provider,
+        "kind": "provider",
+        "runtime_type": "persistent",
+        "managed_by": "provider_registry",
+    }
+
+
+def _normalize_agent(
+    agent: dict[str, Any],
+    *,
+    default_manager: str,
+) -> dict[str, Any]:
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    source = str(metadata.get("source") or "")
+    agent_id = str(agent.get("agent_id") or "")
+    runtime_type = str(metadata.get("runtime_type") or "")
+    if runtime_type not in {"persistent", "temporary", "unknown"}:
+        if agent_id == "local_mock":
+            runtime_type = "temporary"
+        elif source in {"core_builtin", "agent_runtime"}:
+            runtime_type = "persistent"
+        else:
+            runtime_type = "unknown"
+    managed_by = str(metadata.get("managed_by") or "")
+    if managed_by not in {"provider_registry", "agent_registry", "a2a", "goal", "unknown"}:
+        managed_by = "goal" if source == "agent_runtime" else default_manager
+    return {
+        **agent,
+        "kind": "agent",
+        "runtime_type": runtime_type,
+        "managed_by": managed_by,
+    }
+
+
+def _agent_topology(
+    agents: dict[str, Any],
+    a2a: dict[str, Any],
+) -> dict[str, Any]:
+    unified: dict[str, dict[str, Any]] = {}
+    for source_name, collection in (
+        ("agent_registry", agents.get("agents") or []),
+        ("a2a", a2a.get("agents") or []),
+    ):
+        for item in collection:
+            if not isinstance(item, dict):
+                continue
+            agent_id = str(item.get("agent_id") or "")
+            if not agent_id:
+                continue
+            current = unified.get(agent_id)
+            if current is None:
+                unified[agent_id] = {**item, "sources": [source_name]}
+            elif source_name == "a2a":
+                sources = list(dict.fromkeys([*current["sources"], source_name]))
+                unified[agent_id] = {**item, "sources": sources}
+            elif source_name not in current["sources"]:
+                current["sources"].append(source_name)
+    return {
+        "count": len(unified),
+        "agents": [unified[key] for key in sorted(unified)],
+        "source": ["agent_registry", "a2a"],
+    }
+
+
+def _capability_snapshot(
+    providers: dict[str, Any],
+    a2a: dict[str, Any],
+    agents: dict[str, Any],
+) -> dict[str, Any]:
+    provider_capabilities = set(providers.get("capabilities") or [])
+    agent_capabilities = {
+        capability
+        for collection in (
+            a2a.get("agents") or [],
+            agents.get("agents") or [],
+        )
+        for source in collection
+        if isinstance(source, dict)
+        for capability in source.get("capabilities", [])
+    }
+    return {
+        "available": sorted(provider_capabilities | agent_capabilities),
+        "providers": sorted(provider_capabilities),
+        "agents": sorted(agent_capabilities),
+        "source": ["provider_registry", "a2a_client", "agent_registry"],
+    }
+
+
+def _architecture_snapshot() -> dict[str, Any]:
+    return {
+        "name": "NéronOS distributed kernel",
+        "kernel": "core",
+        "decision": "orchestrator",
+        "goal_execution": "goal_engine",
+        "capabilities": "provider_registry",
+        "agents": "a2a_client",
+        "agent_presence_execution": "provider_agent_planned",
+        "memory": "memory_provider",
+        "service_discovery": "service_registry",
+        "self_awareness": "self_model",
+        "principles": [
+            "Core minimal",
+            "Providers pour les capacités",
+            "A2A pour les agents",
+            "Goal Engine pour les objectifs",
+            "Service Registry pour la topologie runtime",
+            "Goal Engine développe les agents et leurs modules",
+            "Provider Agent gérera la présence et l'exécution des agents",
+            "Providers exposent uniquement des capacités stables",
+        ],
+        "separation": {
+            "providers": {
+                "kind": "provider",
+                "role": "Exposer une capacité stable via Provider Registry",
+                "managed_by": "provider_registry",
+            },
+            "agents": {
+                "kind": "agent",
+                "role": "Exécuter une capacité spécialisée via A2A",
+                "developed_by": "goal_engine",
+                "future_manager": "provider_agent",
+            },
+        },
+    }
 
 
 def _safe_goal_runtime() -> dict[str, Any]:
@@ -200,6 +402,14 @@ def build_self_model_snapshot() -> dict[str, Any]:
     goal = _safe_goal_runtime()
     tasks = _safe_task_state()
     identity = _safe_identity()
+    providers = _safe_providers()
+    a2a = _safe_a2a()
+    agents = _safe_agents()
+    agent_topology = _agent_topology(agents, a2a)
+    registered_services = _safe_registered_services()
+    goal_engine = _safe_goal_engine()
+    capabilities = _capability_snapshot(providers, a2a, agents)
+    architecture = _architecture_snapshot()
     runtime = _runtime_from_status(status)
     services = _services_from_status(status)
     diagnostics: list[str] = []
@@ -252,6 +462,14 @@ def build_self_model_snapshot() -> dict[str, Any]:
     return {
         "identity": identity,
         "memory": memory,
+        "providers": providers,
+        "a2a": a2a,
+        "agents": agents,
+        "agent_topology": agent_topology,
+        "capabilities": capabilities,
+        "registered_services": registered_services,
+        "goal_engine": goal_engine,
+        "architecture": architecture,
         "status": status,
         "goal": goal,
         "tasks": tasks,
@@ -322,6 +540,12 @@ class SelfModel:
     capabilities: dict[str, Any] = field(default_factory=dict)
     performance_self_evaluation: dict[str, Any] = field(default_factory=dict)
     services: dict[str, Any] = field(default_factory=dict)
+    providers: dict[str, Any] = field(default_factory=dict)
+    a2a: dict[str, Any] = field(default_factory=dict)
+    agents: dict[str, Any] = field(default_factory=dict)
+    memory: dict[str, Any] = field(default_factory=dict)
+    goals: dict[str, Any] = field(default_factory=dict)
+    architecture: dict[str, Any] = field(default_factory=dict)
     cognitive_state: dict[str, Any] = field(default_factory=dict)
     diagnostics: list[str] = field(default_factory=list)
     recommendations: list[str] = field(default_factory=list)
@@ -340,6 +564,17 @@ class SelfModel:
         self.identity = snapshot["identity"]
         self.runtime = snapshot["runtime"]
         self.services = snapshot["services"]
+        self.providers = snapshot["providers"]
+        self.a2a = snapshot["a2a"]
+        self.agents = snapshot["agents"]
+        self.memory = snapshot["memory"]
+        self.goals = {
+            "engine": snapshot["goal_engine"],
+            "runtime": snapshot["goal"],
+            "tasks": snapshot["tasks"],
+        }
+        self.architecture = snapshot["architecture"]
+        self.capabilities = snapshot["capabilities"]
         self.cognitive_state = snapshot["cognitive_state"]
         self.diagnostics = snapshot["diagnostics"]
         self.recommendations = snapshot["recommendations"]
@@ -375,7 +610,7 @@ class SelfModel:
             "runtime_trend": self.runtime_trend,
             "long_term_state_memory": self.long_term_state_memory,
             "self_confidence": self.self_confidence,
-            "capabilities": self.capabilities,
+            "capabilities": data.get("capabilities") or self.capabilities,
             "performance_self_evaluation": self.performance_self_evaluation,
             "code_awareness": self.code_awareness,
         })
