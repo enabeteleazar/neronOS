@@ -246,7 +246,9 @@ class CoreOrchestrator:
                 requires_goal_pipeline=True,
                 requires_governor=True,
             )
-        elif status_result.get("matched") or intent == Intent.SYSTEM_STATUS:
+        elif (
+            status_result.get("matched") or intent == Intent.SYSTEM_STATUS
+        ) and not memory_result.get("matched"):
             decision = OrchestratorDecision(
                 intent="status_query",
                 selected_route="status_provider",
@@ -1366,7 +1368,9 @@ def _extract_memory_search_query(query: str) -> str:
 
 
 def _extract_memory_recall_query(query: str) -> str:
-    normalized = _normalize(query).strip(" ?!.:,;")
+    normalized = " ".join(
+        re.sub(r"[^a-z0-9 ]+", " ", _normalize(query)).split()
+    )
     patterns = (
         r"^oublie\s+ce\s+que\s+tu\s+sais\s+sur\s+(.+)$",
         r"^oublie\s+que\s+(.+)$",
@@ -1409,6 +1413,35 @@ def _extract_memory_recall_query(query: str) -> str:
         "ou ai je travaille",
         "qu est ce que j aime",
         "qu est ce que j aimais avant",
+        "quels anciens souvenirs possedes tu",
+        "quelles informations ne sont plus actuelles",
+        "quelles informations sont obsoletes",
+        "montre moi tout ce que tu sais",
+        "montre toute ma memoire",
+        "quels souvenirs possedes tu",
+        "combien de souvenirs as tu sur moi",
+        "quels types d informations connais tu",
+        "quels predicats connais tu sur moi",
+        "ai je des informations contradictoires",
+        "as tu detecte des conflits",
+        "y a t il des souvenirs retractes",
+        "as tu des informations douteuses",
+        "y a t il des donnees obsoletes",
+        "qui habite avec moi",
+        "qui depend de moi",
+        "qui fait partie de mon foyer",
+        "si je demenage qui demenage probablement avec moi",
+        "qui est lie a moi",
+        "qui fait partie de ma famille",
+        "qui partage ma vie",
+        "tu me connais bien",
+        "est ce que tu te souviens de moi",
+        "as tu appris des choses sur moi",
+        "qu est ce que tu retiens principalement de moi",
+        "qu est ce qui me caracterise",
+        "que pourrais tu raconter sur moi a quelqu un",
+        "si tu devais me presenter que dirais tu",
+        "quelle est la derniere chose importante que tu as apprise sur moi",
         "combien ai je d enfants",
         "comment s appellent mes enfants",
         "qui sont mes enfants",

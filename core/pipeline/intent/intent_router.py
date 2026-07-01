@@ -463,6 +463,19 @@ def _fallback_intent(query: str) -> Intent | None:
     if any(k in q for k in topology_keywords):
         return Intent.TOPOLOGY_SHOW
 
+    try:
+        from core.modules.memory import detect_memory_intent
+
+        is_memory_request = bool(detect_memory_intent(query).get("matched"))
+    except Exception:
+        is_memory_request = False
+
+    if is_memory_request:
+        # The Core orchestrator owns the memory route/action decision. Returning
+        # conversation here neutralizes false NLP/HA classifications without
+        # turning recall into the legacy MEMORY_SEARCH action.
+        return Intent.CONVERSATION
+
     if any(k in q for k in ha_keywords):
         return Intent.HA_ACTION
 
