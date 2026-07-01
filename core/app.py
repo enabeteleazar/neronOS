@@ -625,25 +625,27 @@ async def enforce_api_key(request: Request, call_next):
         publish_auth_success(request, context)
 
 
-app.include_router(self_model_router)
-app.include_router(selfmodel_router)
-app.include_router(runtime_governor_router)
-app.include_router(world_model_router)
-app.include_router(goals_router)
+_INTERNAL_AUTH = [Depends(verify_api_key)]
+
+app.include_router(self_model_router, dependencies=_INTERNAL_AUTH)
+app.include_router(selfmodel_router, dependencies=_INTERNAL_AUTH)
+app.include_router(runtime_governor_router, dependencies=_INTERNAL_AUTH)
+app.include_router(world_model_router, dependencies=_INTERNAL_AUTH)
+app.include_router(goals_router, dependencies=_INTERNAL_AUTH)
 app.include_router(tools_router)
 app.include_router(scheduler_router)
 app.include_router(agent_runtime_router)
 app.include_router(capabilities_router)
 app.include_router(task_router)
-app.include_router(goal_task_router)
-app.include_router(cognitive_core_router)
-app.include_router(cognitive_report_router)
-app.include_router(action_history_router)
-app.include_router(critic_history_router)
-app.include_router(code_awareness_router)
+app.include_router(goal_task_router, dependencies=_INTERNAL_AUTH)
+app.include_router(cognitive_core_router, dependencies=_INTERNAL_AUTH)
+app.include_router(cognitive_report_router, dependencies=_INTERNAL_AUTH)
+app.include_router(action_history_router, dependencies=_INTERNAL_AUTH)
+app.include_router(critic_history_router, dependencies=_INTERNAL_AUTH)
+app.include_router(code_awareness_router, dependencies=_INTERNAL_AUTH)
 app.include_router(projects_router)
 app.include_router(evolution_router)
-app.include_router(memory_router)
+app.include_router(memory_router, dependencies=_INTERNAL_AUTH)
 
 app.add_middleware(
     CORSMiddleware,
