@@ -97,7 +97,7 @@ from agents.builtin.automation.watchdog_agent import (
 
 # CORE
 from agents.builtin.core.llm_agent import LLMAgent
-from agents.builtin.core.memory_agent import MemoryAgent, init_db as memory_init_db
+from agents.builtin.core.memory_agent import MemoryAgent
 
 # COMMUNICATION
 from agents.builtin.communication.telegram_agent import (
@@ -145,7 +145,6 @@ BASE_URL = HA_CONFIG.get("url")
 TOKEN = HA_CONFIG.get("token")
 SYNC_INTERVAL = HA_CONFIG.get("sync_interval", 60)
 
-from core.modules.oblivia import ObliviaMemoryManager
 from agents.autonomous.planner_agent import AutonomousPlannerAgent
 from core.api.planner_routes import router as planner_router
 
@@ -173,7 +172,6 @@ ha_agent:         HAAgent         | None = None
 code_agent:       CodeAgent       | None = None
 code_audit_agent: CodeAuditAgent  | None = None
 router:           IntentRouter    | None = None
-oblivia_memory:   ObliviaMemoryManager   | None = None
 autonomous_planner_agent: AutonomousPlannerAgent | None = None
 _capability_resolver: CapabilityResolver | None = None
 
@@ -387,7 +385,6 @@ async def lifespan(app: FastAPI):
         llm_agent = LLMAgent()
         web_agent = WebAgent()
 
-        memory_init_db()
         memory_agent = MemoryAgent()
 
         ha_agent = HAAgent()
@@ -400,7 +397,6 @@ async def lifespan(app: FastAPI):
         code_agent = CodeAgent()
         code_audit_agent = CodeAuditAgent()
 
-        oblivia_memory = ObliviaMemoryManager()
         autonomous_planner_agent = AutonomousPlannerAgent("/etc/neron/obsidian-vault")
 
         await ha_agent.on_start()
@@ -916,7 +912,7 @@ async def get_memory(limit: int = 5, _: None = Depends(verify_api_key)):
         raise HTTPException(status_code=503, detail="Agent mémoire non disponible")
     limit = min(max(1, limit), 100)
     try:
-        entries = memory_agent.retrieve(limit=limit)
+        entries = await memory_agent.retrieve(limit=limit)
         return {"entries": entries, "count": len(entries), "timestamp": utc_now_iso()}
     except Exception as e:
         logger.error("Erreur récupération mémoire : %s", e)

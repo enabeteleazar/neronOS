@@ -386,7 +386,8 @@ class GoalEngine:
             logger.info("goal_engine_memory_provider_unavailable goal_id=%s", goal_result.goal_id)
             return False
 
-        response = await provider.execute(
+        response = await self.providers.execute_via_a2a(
+            provider.name,
             ProviderRequest(
                 action="remember",
                 payload={

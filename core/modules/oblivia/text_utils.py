@@ -1,13 +1,3 @@
-from __future__ import annotations
+"""Compatibility import; text processing belongs to :mod:`memory.oblivia`."""
 
-import unicodedata
-
-
-def normalize_text(text: str) -> str:
-    normalized = unicodedata.normalize("NFKD", text or "")
-    without_accents = "".join(
-        char for char in normalized
-        if not unicodedata.combining(char)
-    )
-
-    return " ".join(without_accents.casefold().split())
+from memory.oblivia.text_utils import *

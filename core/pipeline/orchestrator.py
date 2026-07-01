@@ -261,7 +261,10 @@ class CoreOrchestrator:
                 requires_goal_pipeline=False,
                 requires_governor=False,
             )
-        elif intent == Intent.IDENTITY_QUERY:
+        elif (
+            intent == Intent.IDENTITY_QUERY
+            and not memory_result.get("matched")
+        ):
             decision = OrchestratorDecision(
                 intent=Intent.IDENTITY_QUERY.value,
                 selected_route="identity_provider",
@@ -877,11 +880,17 @@ class CoreOrchestrator:
         else:
             payload = {"query": memory_query, "limit": 5}
 
-        provider_response = await provider.execute(
+        provider_response = await provider_registry.execute_via_a2a(
+            provider.name,
             ProviderRequest(
                 action=action,
                 payload=payload,
             )
+        )
+        provider_result = (
+            provider_response.result
+            if isinstance(provider_response.result, dict)
+            else {}
         )
         results = _memory_provider_results(provider_response.result)
         metadata.update(
@@ -891,6 +900,9 @@ class CoreOrchestrator:
                 "provider_status": provider_response.status,
                 "provider_error": provider_response.error,
                 "memory_results": results,
+                "a2a_used": True,
+                "memory_answer": provider_result.get("answer"),
+                "memory_facts": provider_result.get("facts") or [],
             }
         )
         if action == "remember":
@@ -904,8 +916,28 @@ class CoreOrchestrator:
             )
 
         if action == "remember":
+            provider_metadata = provider_result.get("metadata") or {}
             return (
-                f"C’est mémorisé : {remembered_content}",
+                str(
+                    provider_metadata.get("natural_response")
+                    or f"C’est mémorisé : {remembered_content}"
+                ),
+                provider.name,
+                metadata,
+            )
+
+        if action == "forget":
+            forgotten = int(provider_result.get("forgotten") or 0)
+            metadata["memory_forgotten_count"] = forgotten
+            return (
+                "C’est oublié." if forgotten else "Je n’ai trouvé aucune connaissance à oublier.",
+                provider.name,
+                metadata,
+            )
+
+        if provider_result.get("answer"):
+            return (
+                str(provider_result["answer"]),
                 provider.name,
                 metadata,
             )
@@ -1336,6 +1368,9 @@ def _extract_memory_search_query(query: str) -> str:
 def _extract_memory_recall_query(query: str) -> str:
     normalized = _normalize(query).strip(" ?!.:,;")
     patterns = (
+        r"^oublie\s+ce\s+que\s+tu\s+sais\s+sur\s+(.+)$",
+        r"^oublie\s+que\s+(.+)$",
+        r"^efface\s+de\s+ta\s+memoire\s+(.+)$",
         r"^qu\s+as\s+tu\s+memorise\s+sur\s+(.+)$",
         r"^que\s+sais\s+tu\s+sur\s+(.+)$",
         r"^tu\s+te\s+souviens\s+(?:de|sur)?\s*(.+)$",
@@ -1347,6 +1382,41 @@ def _extract_memory_recall_query(query: str) -> str:
             value = match.group(1).strip(" ?!.:,;")
             if value:
                 return value
+    knowledge_questions = (
+        "qui est papa",
+        "comment s appelle ma femme",
+        "qu est ce que j aime boire",
+        "que j aime boire",
+        "comment je m appelle",
+        "qui est mon fils",
+        "ou est ce que j habite",
+        "ou est ce que je travaille",
+        "ou est ce que j habitais avant",
+        "ou habitais je avant",
+        "ou ai je vecu",
+        "dans quelles villes ai je vecu",
+        "ou travaillais je avant",
+        "comment je m appelais avant",
+        "comment s appelait ma femme avant",
+        "j aime quoi",
+        "qui suis je",
+        "parle moi de moi",
+        "presente moi",
+        "que sais tu de moi",
+        "fais un resume de ce que tu sais sur moi",
+        "qui est ma femme",
+        "qui est mon epouse",
+        "ou ai je travaille",
+        "qu est ce que j aime",
+        "qu est ce que j aimais avant",
+        "combien ai je d enfants",
+        "comment s appellent mes enfants",
+        "qui sont mes enfants",
+    )
+    if any(pattern in normalized for pattern in knowledge_questions):
+        return normalized
+    if re.fullmatch(r"qui est [a-z][a-z0-9 ]*", normalized):
+        return normalized
     return ""
 
 
@@ -1375,7 +1445,7 @@ def _memory_provider_action(
     if decision.intent == Intent.MEMORY_SEARCH.value:
         return "search"
     kind = str(memory_result.get("kind") or "")
-    if kind in {"remember", "recall", "search", "status"}:
+    if kind in {"remember", "recall", "search", "forget", "status"}:
         return kind
     normalized = _normalize(query)
     if any(
@@ -1387,6 +1457,8 @@ def _memory_provider_action(
 
 
 def _memory_provider_results(value: Any) -> list[dict[str, str]]:
+    if isinstance(value, dict):
+        value = value.get("results") or []
     if not isinstance(value, list):
         return []
 

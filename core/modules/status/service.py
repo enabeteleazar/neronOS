@@ -54,7 +54,7 @@ def build_status_payload() -> dict:
         "timer": "loaded" if _module_available("core.modules.timer") else "missing",
         "status": "loaded",
         "memory": "loaded" if _module_available("core.modules.memory") else "missing",
-        "oblivia": "loaded" if _module_available("core.modules.oblivia") else "missing",
+        "oblivia": "loaded" if _module_available("memory.oblivia") else "missing",
     }
 
     goal_pipeline = _check_goal_pipeline()

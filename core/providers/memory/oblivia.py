@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.modules.oblivia.manager import ObliviaMemoryManager
-from core.modules.oblivia.schemas import MemoryQuery, MemoryRecord
+from memory.oblivia.manager import ObliviaMemoryManager
+from memory.oblivia.schemas import MemoryQuery, MemoryRecord
 
 from ..models import ProviderRequest, ProviderResponse, ProviderStatus, ProviderType
 from ..protocol import ProviderProtocol
@@ -30,7 +30,17 @@ class ObliviaProvider(ProviderProtocol):
 
     @property
     def capabilities(self) -> list[str]:
-        return ["health", "remember", "recall", "search", "status"]
+        return [
+            "health",
+            "remember",
+            "recall",
+            "search",
+            "forget",
+            "update",
+            "recent",
+            "cleanup",
+            "status",
+        ]
 
     async def health(self) -> ProviderResponse:
         return await self.execute(ProviderRequest(action="health"))
@@ -43,7 +53,7 @@ class ObliviaProvider(ProviderProtocol):
                 self._status = "healthy" if getattr(result, "ok", False) else "degraded"
                 return self._response(request, result=self._dump(result))
 
-            if action == "remember":
+            if action in {"remember", "update"}:
                 payload = request.payload
                 record = MemoryRecord(
                     source=payload.get("source", "memory_manager"),
@@ -61,10 +71,16 @@ class ObliviaProvider(ProviderProtocol):
                     category=payload.get("category"),
                     limit=int(payload.get("limit") or 10),
                 )
-                return self._response(
-                    request,
-                    result=[self._dump(item) for item in self._manager.recall(query)],
+                knowledge = self._manager.recall_knowledge(
+                    query.query,
+                    limit=query.limit,
                 )
+                return self._response(request, result={
+                    **knowledge,
+                    "results": [
+                        self._dump(item) for item in self._manager.recall(query)
+                    ],
+                })
 
             if action == "search":
                 payload = request.payload
@@ -73,6 +89,33 @@ class ObliviaProvider(ProviderProtocol):
                 return self._response(
                     request,
                     result=[self._dump(item) for item in self._manager.search(query, limit=limit)],
+                )
+
+            if action == "forget":
+                payload = request.payload
+                query = str(payload.get("query") or payload.get("text") or "")
+                if not query.strip():
+                    raise ValueError("forget query is required")
+                return self._response(
+                    request,
+                    result=self._manager.forget(query),
+                )
+
+            if action == "recent":
+                limit = int(request.payload.get("limit") or 10)
+                return self._response(
+                    request,
+                    result=[
+                        self._dump(item)
+                        for item in self._manager.recent(limit)
+                    ],
+                )
+
+            if action == "cleanup":
+                days = max(1, int(request.payload.get("days") or 30))
+                return self._response(
+                    request,
+                    result=self._manager.cleanup(days),
                 )
 
             return self._response(
