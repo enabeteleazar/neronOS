@@ -46,8 +46,10 @@ def detect_memory_intent(text: str) -> dict:
         r"^j'ai (?:un|une)\s+\S",
         r"^je possede\s+\S",
         r"^j'utilise\s+\S",
-        r"^mon telephone est\s+\S",
-        r"^mon ordinateur est\s+\S",
+        r"^(?:mon|ma|mes)\s+.+\s+(?:est|sont)(?: maintenant)?\s+\S",
+        r"^(?:mon|ma|mes)\s+.+\s+s'appelle\s+\S",
+        r"^(?!comment\s).+\s+s'appelle\s+\S",
+        r"^j'ai remplace\s+.+\s+par\s+\S",
     )
 
     remember_patterns = [
@@ -155,6 +157,16 @@ def detect_memory_intent(text: str) -> dict:
 
     if any(p in value for p in recall_patterns):
         return {"matched": True, "kind": "recall", "confidence": 0.9}
+
+    personal_recall_patterns = (
+        r"^quel(?:le)? est (?:mon|ma|mes)\s+.+$",
+        r"^de quelle couleur est (?:mon|ma|mes)\s+.+$",
+        r"^ou est (?:mon|ma|mes)\s+.+$",
+        r"^comment s'appelle (?:mon|ma|mes)\s+.+$",
+        r"^quel(?:le)? (?:systeme|solution|appareil).+j'utilise$",
+    )
+    if any(re.match(pattern, value) for pattern in personal_recall_patterns):
+        return {"matched": True, "kind": "recall", "confidence": 0.95}
 
     if re.fullmatch(r"qui est [a-z][a-z0-9' ]*", value):
         return {"matched": True, "kind": "recall", "confidence": 0.85}
