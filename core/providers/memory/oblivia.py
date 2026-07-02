@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from memory.oblivia.manager import ObliviaMemoryManager
-from memory.oblivia.schemas import MemoryQuery, MemoryRecord
+from memory.oblivia import MemoryQuery, MemoryRecord, ObliviaMemoryManager
 
 from ..models import ProviderRequest, ProviderResponse, ProviderStatus, ProviderType
 from ..protocol import ProviderProtocol

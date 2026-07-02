@@ -42,6 +42,12 @@ def detect_memory_intent(text: str) -> dict:
         r"^j'ai (?:[0-9]+|un|une|deux|trois|quatre|cinq|six|sept|huit|neuf|dix) enfants?\s*",
         r"^mes enfants s'appellent\s+\S",
         r"^mes enfants sont\s+\S",
+        r"^j'ai achete\s+\S",
+        r"^j'ai (?:un|une)\s+\S",
+        r"^je possede\s+\S",
+        r"^j'utilise\s+\S",
+        r"^mon telephone est\s+\S",
+        r"^mon ordinateur est\s+\S",
     )
 
     remember_patterns = [
@@ -125,6 +131,12 @@ def detect_memory_intent(text: str) -> dict:
         "que pourrais tu raconter sur moi a quelqu'un",
         "si tu devais me presenter que dirais tu",
         "quelle est la derniere chose importante que tu as apprise sur moi",
+        "quel est mon telephone",
+        "quel telephone j'utilise",
+        "quel smartphone ai je",
+        "quels appareils je possede",
+        "qu'est ce que j'ai achete",
+        "tu te souviens de mon telephone",
     ]
 
     forget_patterns = [

@@ -27,7 +27,7 @@ from modules.evolution.routes import router as evolution_router
 
 from core.logging.setup import logger
 
-from core.modules.oblivia.router import router as memory_router
+from core.modules.memory.router import router as memory_router
 
 logger.info("Booting Néron Core...")
 
@@ -145,7 +145,6 @@ BASE_URL = HA_CONFIG.get("url")
 TOKEN = HA_CONFIG.get("token")
 SYNC_INTERVAL = HA_CONFIG.get("sync_interval", 60)
 
-from agents.autonomous.planner_agent import AutonomousPlannerAgent
 from core.api.planner_routes import router as planner_router
 
 # =========================
@@ -172,7 +171,6 @@ ha_agent:         HAAgent         | None = None
 code_agent:       CodeAgent       | None = None
 code_audit_agent: CodeAuditAgent  | None = None
 router:           IntentRouter    | None = None
-autonomous_planner_agent: AutonomousPlannerAgent | None = None
 _capability_resolver: CapabilityResolver | None = None
 
 def utc_now_iso() -> str:
@@ -332,7 +330,7 @@ async def lifespan(app: FastAPI):
     global llm_agent, web_agent, stt_agent, tts_agent, ha_agent
     global router, _startup_time, memory_agent
     global code_agent, code_audit_agent, _gateway_task, _self_monitor_task, _registry_stale_task
-    global obsidian_agent, autonomous_planner_agent
+    global obsidian_agent
 
     telegram_enabled = False
     telegram_token = ""
@@ -396,8 +394,6 @@ async def lifespan(app: FastAPI):
 
         code_agent = CodeAgent()
         code_audit_agent = CodeAuditAgent()
-
-        autonomous_planner_agent = AutonomousPlannerAgent("/etc/neron/obsidian-vault")
 
         await ha_agent.on_start()
 
