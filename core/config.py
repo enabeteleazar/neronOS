@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from common.paths import NERON_CONFIG, NERON_ROOT
 from core.identity import build_identity_prompt, get_identity
 
 try:
@@ -17,8 +18,8 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-NERON_DIR = Path(os.getenv("NERON_DIR", Path(__file__).parent.parent))
-YAML_PATH = Path("/etc/neron/neron.yaml")
+NERON_DIR = Path(os.getenv("NERON_DIR", str(NERON_ROOT))).expanduser()
+YAML_PATH = NERON_CONFIG
 
 # Niveaux de log valides — utilisé pour valider LOG_LEVEL
 _VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}

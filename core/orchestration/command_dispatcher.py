@@ -4,6 +4,7 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
+from common.paths import NERON_DATA_DIR
 from modules.evolution.supervisor import (
     format_proposals_for_telegram,
     get_evolution_supervisor,
@@ -26,7 +27,7 @@ class NeronCommandDispatcher:
         goal_orchestrator_factory=get_goal_orchestrator,
         evolution_supervisor_factory=get_evolution_supervisor,
         plan_storage_factory=PlanStorage,
-        goals_state_path: Path = Path("/etc/neron/data/goals_state.json"),
+        goals_state_path: Path = NERON_DATA_DIR / "goals_state.json",
         goal_manager_factory=get_goal_manager,
     ) -> None:
         self.goal_orchestrator_factory = goal_orchestrator_factory

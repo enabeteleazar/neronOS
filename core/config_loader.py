@@ -5,8 +5,9 @@ from typing import Any
 
 import yaml
 
+from common.paths import NERON_CONFIG
 
-CONFIG_PATH = "/etc/neron/neron.yaml"
+CONFIG_PATH = str(NERON_CONFIG)
 
 
 class ConfigLoader:

@@ -11,10 +11,15 @@ from core.config import settings
 from core.infrastructure.event_bus import EventBus, event_bus
 
 
-OFFICIAL_API_KEY_HEADER = "X-Neron-API-Key"
-LEGACY_API_KEY_HEADER = "X-API-Key"
+AUTHORIZATION_HEADER = "Authorization"
+BEARER_PREFIX = "Bearer "
+INVALID_API_KEY_DETAIL = "Invalid or missing API key"
 
 PUBLIC_ROUTES = frozenset({("GET", "/health")})
+LOCAL_REGISTRY_ROUTES = frozenset({
+    ("POST", "/registry/register"),
+    ("POST", "/registry/heartbeat"),
+})
 PROTECTED_ROUTE_PREFIXES = (
     "/status",
     "/events",
@@ -43,15 +48,19 @@ def is_public_route(method: str, path: str) -> bool:
     return (method.upper(), path) in PUBLIC_ROUTES
 
 
-def extract_api_key(request: Request) -> tuple[str | None, str | None]:
-    official = request.headers.get(OFFICIAL_API_KEY_HEADER)
-    if official is not None:
-        return official.strip() or None, OFFICIAL_API_KEY_HEADER
+def is_local_registry_route(request: Request) -> bool:
+    client_host = request.client.host if request.client is not None else ""
+    return (
+        (request.method.upper(), request.url.path) in LOCAL_REGISTRY_ROUTES
+        and client_host in {"127.0.0.1", "::1", "localhost"}
+    )
 
-    legacy = request.headers.get(LEGACY_API_KEY_HEADER)
-    if legacy is not None:
-        return legacy.strip() or None, LEGACY_API_KEY_HEADER
-    return None, None
+
+def extract_api_key(request: Request) -> str | None:
+    authorization = request.headers.get(AUTHORIZATION_HEADER)
+    if authorization and authorization.startswith(BEARER_PREFIX):
+        return authorization.split(" ", 1)[1].strip() or None
+    return None
 
 
 def authenticate_request(request: Request) -> AuthContext:
@@ -63,16 +72,16 @@ def authenticate_request(request: Request) -> AuthContext:
             "not_configured",
         )
 
-    supplied_key, header_name = extract_api_key(request)
+    supplied_key = extract_api_key(request)
     if supplied_key is None:
-        raise AuthenticationError(401, "API Key manquante", "missing")
+        raise AuthenticationError(401, INVALID_API_KEY_DETAIL, "missing")
     if not hmac.compare_digest(supplied_key, configured_key):
-        raise AuthenticationError(403, "API Key invalide", "invalid")
+        raise AuthenticationError(401, INVALID_API_KEY_DETAIL, "invalid")
 
     trace_id = request.headers.get("X-Neron-Trace-Id") or str(uuid4())
     return AuthContext(
         authenticated=True,
-        header_name=header_name or OFFICIAL_API_KEY_HEADER,
+        header_name=AUTHORIZATION_HEADER,
         authenticated_at=datetime.now(timezone.utc),
         trace_id=trace_id,
     )

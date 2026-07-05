@@ -16,9 +16,9 @@ FORWARDED_REQUEST_HEADERS = frozenset(
     {
         "accept",
         "accept-language",
+        "authorization",
         "content-type",
         "user-agent",
-        "x-neron-api-key",
     }
 )
 FORWARDED_RESPONSE_HEADERS = frozenset(

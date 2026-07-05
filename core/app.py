@@ -66,6 +66,7 @@ from core.api.auth import verify_api_key
 from core.infrastructure.auth import (
     AuthenticationError,
     authenticate_request,
+    is_local_registry_route,
     is_public_route,
     publish_auth_failure,
     publish_auth_success,
@@ -161,6 +162,7 @@ TAG = "Phase 2.1 - Codex Assisted Agent Builder validated"
 _startup_time: float               = 0.0
 _gateway_task: asyncio.Task | None = None
 _self_monitor_task: asyncio.Task | None = None
+_registry_stale_task: asyncio.Task | None = None
 
 llm_agent:        LLMAgent        | None = None
 memory_agent:     MemoryAgent     | None = None
@@ -388,7 +390,10 @@ async def lifespan(app: FastAPI):
         ha_agent = HAAgent()
 
         stt_agent = STTAgent()
-        await asyncio.get_event_loop().run_in_executor(None, load_model)
+        try:
+            await asyncio.get_event_loop().run_in_executor(None, load_model)
+        except Exception as exc:
+            logger.warning("STT indisponible au démarrage : %s", exc)
 
         tts_agent = TTSAgent()
 
@@ -598,7 +603,7 @@ async def enforce_api_key(request: Request, call_next):
     if request.method == "OPTIONS" or is_public_route(
         request.method,
         request.url.path,
-    ):
+    ) or is_local_registry_route(request):
         return await call_next(request)
 
     try:

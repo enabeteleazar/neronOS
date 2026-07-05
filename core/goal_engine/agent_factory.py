@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from common.paths import NERON_DATA_DIR, NERON_ROOT, NERON_WORKSPACE_DIR
 from .models import GoalAnalysis
 from core.providers.models import ProviderRequest
 from core.providers.registry import ProviderRegistry
@@ -116,8 +117,8 @@ class AgentFactory:
         plan: AgentCreationPlan,
         providers: ProviderRegistry,
         *,
-        generated_dir: Path = Path("/etc/neron/workspace/generated_candidates/agents"),
-        tests_dir: Path = Path("/etc/neron/workspace/generated_candidates/tests"),
+        generated_dir: Path = NERON_WORKSPACE_DIR / "generated_candidates" / "agents",
+        tests_dir: Path = NERON_WORKSPACE_DIR / "generated_candidates" / "tests",
     ) -> AgentCreationArtifacts:
         llm_infos = providers.by_type("llm")
         llm = providers.get(llm_infos[0].name) if llm_infos else None
@@ -177,8 +178,8 @@ class AgentFactory:
     def existing_candidate(
         plan: AgentCreationPlan,
         *,
-        generated_dir: Path = Path("/etc/neron/workspace/generated_candidates/agents"),
-        tests_dir: Path = Path("/etc/neron/workspace/generated_candidates/tests"),
+        generated_dir: Path = NERON_WORKSPACE_DIR / "generated_candidates" / "agents",
+        tests_dir: Path = NERON_WORKSPACE_DIR / "generated_candidates" / "tests",
     ) -> AgentCreationArtifacts | None:
         agent_file = generated_dir / f"{plan.spec.name}.py"
         test_file = tests_dir / f"test_{plan.spec.name}.py"
@@ -244,8 +245,8 @@ class AgentFactory:
     def promote(
         artifacts: AgentCreationArtifacts,
         *,
-        generated_dir: Path = Path("/etc/neron/data/generated_agents"),
-        tests_dir: Path = Path("/etc/neron/data/generated_agent_tests"),
+        generated_dir: Path = NERON_DATA_DIR / "generated_agents",
+        tests_dir: Path = NERON_DATA_DIR / "generated_agent_tests",
     ) -> AgentCreationArtifacts:
         generated_dir.mkdir(parents=True, exist_ok=True)
         tests_dir.mkdir(parents=True, exist_ok=True)
@@ -288,7 +289,7 @@ class AgentFactory:
             text=True,
             capture_output=True,
             timeout=timeout,
-            cwd="/etc/neron",
+            cwd=str(NERON_ROOT),
         )
         if completed.returncode != 0:
             raise RuntimeError(

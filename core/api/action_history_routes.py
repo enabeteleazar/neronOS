@@ -3,13 +3,14 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from fastapi import APIRouter
+from common.paths import NERON_DATA_DIR
 from modules.cognitive.history import read_jsonl_tail
 
 
 ACTION_HISTORY_PATH = Path(
     os.getenv(
         "NERON_ACTION_HISTORY_PATH",
-        "/etc/neron/data/action_history.jsonl",
+        str(NERON_DATA_DIR / "action_history.jsonl"),
     )
 )
 

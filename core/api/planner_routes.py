@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from common.paths import NERON_DATA_DIR
 from core.api.auth import verify_api_key
 from goal.planning import AutonomousPlanner
 from goal.planning.executor import PlanExecutor
@@ -85,8 +86,8 @@ async def planner_status() -> dict:
         "mode": "approval_required",
         "execution_enabled": True,
         "code_write_mode": "draft_only",
-        "source_of_truth": "/etc/neron/data/neron_state.sqlite3:workflows",
-        "legacy_mirror": "/etc/neron/data/plans.jsonl",
+        "source_of_truth": f"{NERON_DATA_DIR / 'neron_state.sqlite3'}:workflows",
+        "legacy_mirror": str(NERON_DATA_DIR / "plans.jsonl"),
         "routes": [
             "POST /planner/create",
             "GET /planner/status",

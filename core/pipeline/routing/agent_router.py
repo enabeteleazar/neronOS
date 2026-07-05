@@ -11,11 +11,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from common.paths import NERON_WORKSPACE_DIR
 from core.pipeline.intent.intent_router import Intent, IntentResult
 
 logger = logging.getLogger("pipeline.agent_router")
 
-WORKSPACE_AGENTS_DIR = Path("/etc/neron/workspace/agents")
+WORKSPACE_AGENTS_DIR = NERON_WORKSPACE_DIR / "agents"
 
 _llm: Optional[object] = None
 _memory: Optional[object] = None

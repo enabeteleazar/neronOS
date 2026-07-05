@@ -6,8 +6,9 @@ import re
 from pathlib import Path
 from typing import Any
 
+from common.paths import NERON_IDENTITY_PATH
 
-NERON_MD_PATH = Path("/etc/neron/server/memory/obsidian/identity/NERON.md")
+NERON_MD_PATH = NERON_IDENTITY_PATH
 MAX_CONTEXT_CHARS = 3600
 MAX_RESPONSE_CHARS = 2200
 LLM_TIMEOUT_SECONDS = 2.5

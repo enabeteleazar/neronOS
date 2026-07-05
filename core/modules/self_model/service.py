@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from common.paths import NERON_DATA_DIR
 from core.identity import get_identity
 from core.modules.status.service import build_status_payload
 
@@ -17,7 +18,7 @@ DEFAULT_TZ = "Europe/Paris"
 STATE_PATH = Path(
     os.getenv(
         "NERON_SELF_MODEL_STATE_PATH",
-        "/etc/neron/data/self_model_state.json",
+        str(NERON_DATA_DIR / "self_model_state.json"),
     )
 )
 

@@ -149,7 +149,7 @@ class LLMProvider(ProviderProtocol):
     def _headers(self) -> dict[str, str]:
         if not self._api_key:
             return {}
-        return {"X-Neron-API-Key": self._api_key}
+        return {"Authorization": f"Bearer {self._api_key}"}
 
     @staticmethod
     def _status_from_health(health: dict[str, Any]) -> ProviderStatus:
