@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unicodedata
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict
@@ -39,6 +40,10 @@ class Intent(str, Enum):
     NETWORK_STATUS       = "network_status"
     IDENTITY_QUERY       = "identity_query"
     SELF_STATUS          = "self_status"
+    MEMORY_SEARCH        = "memory_search"
+    REGISTRY_LIST       = "registry_list"
+    REGISTRY_STATUS     = "registry_status"
+    TOPOLOGY_SHOW       = "topology_show"
 
     NEWS_QUERY           = "news_query"
     WEATHER_QUERY        = "weather_query"
@@ -346,6 +351,32 @@ def _fallback_intent(query: str) -> Intent | None:
         "parle autrement",
     ]
 
+    memory_search_prefixes = (
+        "recherche ",
+        "cherche ",
+        "retrouve ",
+    )
+    memory_search_keywords = [
+        "recherche dans ta memoire",
+        "cherche dans ta memoire",
+        "recherche memoire",
+        "qu as tu memorise sur",
+        "que sais tu sur",
+        "retrouve mes notes sur",
+    ]
+
+    for prefix in memory_search_prefixes:
+        if q.startswith(prefix):
+            target = q.removeprefix(prefix).strip()
+            if (
+                re.search(r"\bphase\s+\d+\b", target)
+                or target in {"oblivia", "sqlite", "goal engine"}
+            ):
+                return Intent.MEMORY_SEARCH
+
+    if any(k in q for k in memory_search_keywords):
+        return Intent.MEMORY_SEARCH
+
     if any(k in q for k in time_keywords):
         return Intent.TIME_QUERY
 
@@ -398,6 +429,52 @@ def _fallback_intent(query: str) -> Intent | None:
 
     if any(k in q for k in news_keywords):
         return Intent.NEWS_QUERY
+
+    # Catalogue questions take precedence over action intents. Mentioning
+    # Home Assistant is not an HA action when asking which service owns it.
+    registry_status_keywords = [
+        "quels services sont arretes",
+        "services arretes",
+        "services hors ligne",
+        "services down",
+    ]
+    if any(k in q for k in registry_status_keywords):
+        return Intent.REGISTRY_STATUS
+
+    registry_keywords = [
+        "quels services sont enregistres",
+        "services enregistres",
+        "quel service fournit les llm",
+        "quel service fournit le llm",
+        "quel service gere home assistant",
+        "quel service gere la memoire",
+    ]
+    if any(k in q for k in registry_keywords):
+        return Intent.REGISTRY_LIST
+
+    topology_keywords = [
+        "montre moi la topologie",
+        "montre la topologie",
+        "topologie du systeme",
+        "affiche la topologie",
+        "voir la topologie",
+        "schema du systeme",
+    ]
+    if any(k in q for k in topology_keywords):
+        return Intent.TOPOLOGY_SHOW
+
+    try:
+        from core.modules.memory import detect_memory_intent
+
+        is_memory_request = bool(detect_memory_intent(query).get("matched"))
+    except Exception:
+        is_memory_request = False
+
+    if is_memory_request:
+        # The Core orchestrator owns the memory route/action decision. Returning
+        # conversation here neutralizes false NLP/HA classifications without
+        # turning recall into the legacy MEMORY_SEARCH action.
+        return Intent.CONVERSATION
 
     if any(k in q for k in ha_keywords):
         return Intent.HA_ACTION

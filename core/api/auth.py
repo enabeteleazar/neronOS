@@ -1,24 +1,22 @@
+"""Compatibility facade for the centralized Core authentication module."""
+
 from __future__ import annotations
 
-import hmac
+from fastapi import HTTPException, Request
 
-from fastapi import HTTPException, Security
-from fastapi.security.api_key import APIKeyHeader
+from core.infrastructure.auth import (
+    AuthContext,
+    AuthenticationError,
+    authenticate_request,
+    settings,
+)
 
-from core.config import settings
 
-
-API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
-
-
-async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> None:
-    configured_key = str(settings.API_KEY or "").strip()
-    if not configured_key or configured_key == "changez_moi":
-        raise HTTPException(
-            status_code=503,
-            detail="Authentification API non configurée",
-        )
-    if not api_key:
-        raise HTTPException(status_code=401, detail="API Key manquante")
-    if not hmac.compare_digest(str(api_key), configured_key):
-        raise HTTPException(status_code=403, detail="API Key invalide")
+async def verify_api_key(request: Request) -> AuthContext:
+    context = getattr(request.state, "auth", None)
+    if context is not None:
+        return context
+    try:
+        return authenticate_request(request)
+    except AuthenticationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc

@@ -10,9 +10,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator
 
+from common.paths import NERON_DATA_DIR
 
 DEFAULT_DATABASE_PATH = Path(
-    os.getenv("NERON_STATE_DB", "/etc/neron/data/neron_state.sqlite3")
+    os.getenv("NERON_STATE_DB", str(NERON_DATA_DIR / "neron_state.sqlite3"))
 )
 
 _LOCKS_GUARD = threading.Lock()

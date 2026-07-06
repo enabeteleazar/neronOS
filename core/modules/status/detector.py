@@ -36,6 +36,7 @@ def detect_status_intent(text: str) -> dict:
     services_patterns = [
         "services actifs",
         "quels services sont actifs",
+        "quels services fonctionnent",
         "liste les services actifs",
         "quels services tournent",
         "services disponibles",

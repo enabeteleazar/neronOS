@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from core.api.self_model_context_routes import router as self_model_router
+from core.api.selfmodel_routes import router as selfmodel_router
 from core.api.runtime_governor_routes import router as runtime_governor_router
 from core.api.world_model_routes import router as world_model_router
 from goal.goals.routes import router as goals_router
@@ -26,7 +27,7 @@ from modules.evolution.routes import router as evolution_router
 
 from core.logging.setup import logger
 
-from core.modules.oblivia.router import router as memory_router
+from core.modules.memory.router import router as memory_router
 
 logger.info("Booting Néron Core...")
 
@@ -35,7 +36,6 @@ logger.info("Booting Néron Core...")
 # =========================
 
 import asyncio
-import hmac
 import json
 import os
 import time
@@ -46,7 +46,7 @@ from typing import Optional
 import psutil
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
     REGISTRY,
@@ -63,6 +63,22 @@ from pydantic import BaseModel, Field
 
 from agents.builtin.base_agent import get_logger
 from core.api.auth import verify_api_key
+from core.infrastructure.auth import (
+    AuthenticationError,
+    authenticate_request,
+    is_local_registry_route,
+    is_public_route,
+    publish_auth_failure,
+    publish_auth_success,
+)
+from core.infrastructure.event_bus import event_bus as infrastructure_event_bus
+from core.infrastructure.gateway import GatewayError, proxy_request
+from core.infrastructure.health import health_state
+from core.infrastructure.logging import log_event
+from core.infrastructure.registry import ServiceRegistration, service_registry
+from core.infrastructure.topology import build_topology, get_topology_service
+from core.a2a import a2a_client
+from core.providers import ensure_default_providers, provider_registry
 
 # DEV
 from agents.builtin.dev.code_agent.agent import CodeAgent
@@ -82,7 +98,7 @@ from agents.builtin.automation.watchdog_agent import (
 
 # CORE
 from agents.builtin.core.llm_agent import LLMAgent
-from agents.builtin.core.memory_agent import MemoryAgent, init_db as memory_init_db
+from agents.builtin.core.memory_agent import MemoryAgent
 
 # COMMUNICATION
 from agents.builtin.communication.telegram_agent import (
@@ -130,8 +146,6 @@ BASE_URL = HA_CONFIG.get("url")
 TOKEN = HA_CONFIG.get("token")
 SYNC_INTERVAL = HA_CONFIG.get("sync_interval", 60)
 
-from core.modules.oblivia import ObliviaMemoryManager
-from agents.autonomous.planner_agent import AutonomousPlannerAgent
 from core.api.planner_routes import router as planner_router
 
 # =========================
@@ -148,6 +162,7 @@ TAG = "Phase 2.1 - Codex Assisted Agent Builder validated"
 _startup_time: float               = 0.0
 _gateway_task: asyncio.Task | None = None
 _self_monitor_task: asyncio.Task | None = None
+_registry_stale_task: asyncio.Task | None = None
 
 llm_agent:        LLMAgent        | None = None
 memory_agent:     MemoryAgent     | None = None
@@ -158,8 +173,6 @@ ha_agent:         HAAgent         | None = None
 code_agent:       CodeAgent       | None = None
 code_audit_agent: CodeAuditAgent  | None = None
 router:           IntentRouter    | None = None
-oblivia_memory:   ObliviaMemoryManager   | None = None
-autonomous_planner_agent: AutonomousPlannerAgent | None = None
 _capability_resolver: CapabilityResolver | None = None
 
 def utc_now_iso() -> str:
@@ -293,20 +306,43 @@ metrics = Metrics()
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 
+
+
+async def _registry_stale_loop() -> None:
+    timeout_seconds = float(os.getenv("NERON_REGISTRY_STALE_TIMEOUT_SECONDS", "90"))
+    interval_seconds = float(os.getenv("NERON_REGISTRY_STALE_INTERVAL_SECONDS", "30"))
+
+    while True:
+        try:
+            stale = service_registry.mark_stale_services(timeout_seconds)
+            if stale:
+                logger.warning(
+                    "Registry stale services: %s",
+                    ", ".join(s["service_name"] for s in stale),
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Registry stale loop error: %s", exc)
+
+        await asyncio.sleep(interval_seconds)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global llm_agent, web_agent, stt_agent, tts_agent, ha_agent
     global router, _startup_time, memory_agent
-    global code_agent, code_audit_agent, _gateway_task, _self_monitor_task
-    global obsidian_agent, autonomous_planner_agent
+    global code_agent, code_audit_agent, _gateway_task, _self_monitor_task, _registry_stale_task
+    global obsidian_agent
 
     telegram_enabled = False
     telegram_token = ""
 
     try:
         _startup_time = time.monotonic()
+        health_state.mark_started()
         logger.info(json.dumps({"event": "startup", "version": VERSION}))
         register_default_subscribers()
+        ensure_default_providers()
 
         try:
             from goal.goals.execution_engine import get_goal_execution_engine
@@ -349,21 +385,20 @@ async def lifespan(app: FastAPI):
         llm_agent = LLMAgent()
         web_agent = WebAgent()
 
-        memory_init_db()
         memory_agent = MemoryAgent()
 
         ha_agent = HAAgent()
 
         stt_agent = STTAgent()
-        await asyncio.get_event_loop().run_in_executor(None, load_model)
+        try:
+            await asyncio.get_event_loop().run_in_executor(None, load_model)
+        except Exception as exc:
+            logger.warning("STT indisponible au démarrage : %s", exc)
 
         tts_agent = TTSAgent()
 
         code_agent = CodeAgent()
         code_audit_agent = CodeAuditAgent()
-
-        oblivia_memory = ObliviaMemoryManager()
-        autonomous_planner_agent = AutonomousPlannerAgent("/etc/neron/obsidian-vault")
 
         await ha_agent.on_start()
 
@@ -470,10 +505,23 @@ async def lifespan(app: FastAPI):
             await start_watchdog()
             await start_watchdog_bot()
 
+        _registry_stale_task = asyncio.create_task(_registry_stale_loop())
+        logger.info("Registry stale detector demarre")
+
         yield
 
     finally:
         logger.info(json.dumps({"event": "shutdown_started"}))
+
+        if _registry_stale_task and not _registry_stale_task.done():
+            _registry_stale_task.cancel()
+            try:
+                await _registry_stale_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.warning("Erreur arrêt Registry stale detector : %s", e)
+
 
         try:
             from goal.goals.background_runner import get_goal_background_runner
@@ -550,53 +598,51 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-PUBLIC_API_PATHS = frozenset({"/health"})
-
-
 @app.middleware("http")
 async def enforce_api_key(request: Request, call_next):
-    if request.method == "OPTIONS" or request.url.path in PUBLIC_API_PATHS:
+    if request.method == "OPTIONS" or is_public_route(
+        request.method,
+        request.url.path,
+    ) or is_local_registry_route(request):
         return await call_next(request)
 
-    configured_key = str(settings.API_KEY or "").strip()
-    if not configured_key or configured_key == "changez_moi":
+    try:
+        context = authenticate_request(request)
+    except AuthenticationError as exc:
+        publish_auth_failure(request, exc)
         return JSONResponse(
-            status_code=503,
-            content={"detail": "Authentification API non configurée"},
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
         )
 
-    supplied_key = request.headers.get("X-API-Key")
-    if not supplied_key:
-        return JSONResponse(
-            status_code=401,
-            content={"detail": "API Key manquante"},
-        )
-    if not hmac.compare_digest(supplied_key, configured_key):
-        return JSONResponse(
-            status_code=403,
-            content={"detail": "API Key invalide"},
-        )
-    return await call_next(request)
+    request.state.auth = context
+    try:
+        return await call_next(request)
+    finally:
+        publish_auth_success(request, context)
 
 
-app.include_router(self_model_router)
-app.include_router(runtime_governor_router)
-app.include_router(world_model_router)
-app.include_router(goals_router)
+_INTERNAL_AUTH = [Depends(verify_api_key)]
+
+app.include_router(self_model_router, dependencies=_INTERNAL_AUTH)
+app.include_router(selfmodel_router, dependencies=_INTERNAL_AUTH)
+app.include_router(runtime_governor_router, dependencies=_INTERNAL_AUTH)
+app.include_router(world_model_router, dependencies=_INTERNAL_AUTH)
+app.include_router(goals_router, dependencies=_INTERNAL_AUTH)
 app.include_router(tools_router)
 app.include_router(scheduler_router)
 app.include_router(agent_runtime_router)
 app.include_router(capabilities_router)
 app.include_router(task_router)
-app.include_router(goal_task_router)
-app.include_router(cognitive_core_router)
-app.include_router(cognitive_report_router)
-app.include_router(action_history_router)
-app.include_router(critic_history_router)
-app.include_router(code_awareness_router)
+app.include_router(goal_task_router, dependencies=_INTERNAL_AUTH)
+app.include_router(cognitive_core_router, dependencies=_INTERNAL_AUTH)
+app.include_router(cognitive_report_router, dependencies=_INTERNAL_AUTH)
+app.include_router(action_history_router, dependencies=_INTERNAL_AUTH)
+app.include_router(critic_history_router, dependencies=_INTERNAL_AUTH)
+app.include_router(code_awareness_router, dependencies=_INTERNAL_AUTH)
 app.include_router(projects_router)
 app.include_router(evolution_router)
-app.include_router(memory_router)
+app.include_router(memory_router, dependencies=_INTERNAL_AUTH)
 
 app.add_middleware(
     CORSMiddleware,
@@ -627,6 +673,45 @@ class CoreResponse(BaseModel):
     metadata:          dict          = Field(default_factory=dict)
 
 
+class EventPublishInput(BaseModel):
+    event_type: str = Field(min_length=1)
+    source: str = Field(min_length=1)
+    payload: dict = Field(default_factory=dict)
+    target: Optional[str] = None
+    trace_id: Optional[str] = None
+    level: str = Field(default="info", pattern="^(info|warning|error)$")
+
+
+class ServiceRegisterInput(BaseModel):
+    service_name: str = Field(min_length=1)
+    host: str = Field(min_length=1)
+    port: int = Field(ge=1, le=65_535)
+    version: Optional[str] = None
+    status: str = Field(
+        default="unknown",
+        pattern="^(healthy|degraded|unhealthy|unknown)$",
+    )
+    capabilities: list[str] = Field(default_factory=list)
+    metadata: dict = Field(default_factory=dict)
+
+
+class ServiceHeartbeatInput(BaseModel):
+    service_name: str = Field(min_length=1)
+    status: Optional[str] = Field(
+        default=None,
+        pattern="^(healthy|degraded|unhealthy|unknown)$",
+    )
+    metadata: Optional[dict] = None
+
+
+def _service_registration_response(service: dict) -> ServiceRegistration:
+    """Rebuild the strict response model from the Registry wire format."""
+
+    payload = dict(service)
+    payload.pop("last_heartbeat", None)
+    return ServiceRegistration.model_validate(payload, strict=False)
+
+
 # ── Routes systeme ────────────────────────────────────────────────────────────
 
 @app.get("/")
@@ -640,20 +725,174 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "healthy", "version": VERSION}
+    return health_state.health(VERSION)
+
+
+async def _refresh_provider_health() -> None:
+    for provider_info in provider_registry.list():
+        provider = provider_registry.get(provider_info.name)
+        if provider is None:
+            continue
+        try:
+            await provider.health()
+        except Exception as exc:
+            logger.warning("Provider health refresh failed for %s: %s", provider_info.name, exc)
 
 
 @app.get("/status")
-def status():
+async def status():
+    ensure_default_providers()
+    await _refresh_provider_health()
+    return health_state.status(
+        VERSION,
+        dependencies={},
+        registry=service_registry.status(),
+        event_bus=infrastructure_event_bus.status(),
+        providers=provider_registry.status(),
+        a2a=a2a_client.status(),
+    )
+
+
+@app.get("/events")
+def list_infrastructure_events(
+    limit: int = 100,
+    event_type: Optional[str] = None,
+    source: Optional[str] = None,
+    target: Optional[str] = None,
+    trace_id: Optional[str] = None,
+):
+    limit = min(max(0, limit), 1_000)
+    events = infrastructure_event_bus.get_events(
+        limit,
+        event_type=event_type,
+        source=source,
+        target=target,
+        trace_id=trace_id,
+    )
+    return {"events": events, "count": len(events)}
+
+
+@app.post("/events/publish")
+def publish_infrastructure_event(input_data: EventPublishInput):
+    event = infrastructure_event_bus.publish(
+        event_type=input_data.event_type,
+        source=input_data.source,
+        payload=input_data.payload,
+        target=input_data.target,
+        trace_id=input_data.trace_id,
+        level=input_data.level,
+    )
+    log_event(
+        service="core",
+        level="info",
+        message="infrastructure_event_published",
+        trace_id=event["trace_id"],
+        extra={"event_id": event["event_id"], "event_type": event["type"]},
+    )
+    return event
+
+
+@app.get("/registry/services")
+def list_registered_services(
+    status: Optional[str] = None,
+    capability: Optional[str] = None,
+):
+    services = service_registry.list_services(
+        status=status,
+        capability=capability,
+    )
+    return {"services": services, "count": len(services)}
+
+
+@app.get("/registry/topology")
+def registry_topology():
+    return build_topology(service_registry)
+
+
+@app.get("/registry/topology/{service_name}")
+def registry_topology_service(service_name: str):
+    service = get_topology_service(service_registry, service_name)
+    if service is None:
+        raise HTTPException(status_code=404, detail="Service not registered")
+    return service
+
+
+@app.get("/registry/services/{service_name}", response_model=ServiceRegistration)
+def get_registered_service(service_name: str):
+    service = service_registry.get_service(service_name)
+    if service is None:
+        raise HTTPException(status_code=404, detail="Service not registered")
+    return _service_registration_response(service)
+
+
+@app.post("/registry/register", response_model=ServiceRegistration)
+def register_service(input_data: ServiceRegisterInput):
+    service = service_registry.register(
+        service_name=input_data.service_name,
+        host=input_data.host,
+        port=input_data.port,
+        version=input_data.version,
+        status=input_data.status,
+        capabilities=input_data.capabilities,
+        metadata=input_data.metadata,
+    )
+    log_event(
+        service="core",
+        level="info",
+        message="service_registered",
+        extra={"service_name": input_data.service_name},
+    )
+    return _service_registration_response(service)
+
+
+@app.post("/registry/heartbeat", response_model=ServiceRegistration)
+def heartbeat_service(input_data: ServiceHeartbeatInput):
+    service = service_registry.heartbeat(
+        input_data.service_name,
+        status=input_data.status,
+        metadata=input_data.metadata,
+    )
+    if service is None:
+        raise HTTPException(status_code=404, detail="Service not registered")
+    return _service_registration_response(service)
+
+
+@app.delete("/registry/services/{service_name}", response_model=ServiceRegistration)
+def unregister_service(service_name: str):
+    service = service_registry.unregister(service_name)
+    if service is None:
+        raise HTTPException(status_code=404, detail="Service not registered")
+    return _service_registration_response(service)
+
+
+@app.api_route(
+    "/gateway/{service_name}/{path:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+)
+async def gateway_proxy(service_name: str, path: str, request: Request):
     try:
-        return world_model.get()
-    except Exception as e:
-        raise HTTPException(500, f"Impossible de recuperer le status : {e}")
+        proxied = await proxy_request(
+            service_name=service_name,
+            path=path,
+            method=request.method,
+            headers=request.headers,
+            body=await request.body(),
+            query_params=list(request.query_params.multi_items()),
+        )
+    except GatewayError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+    response_headers = dict(proxied.headers)
+    response_headers["X-Neron-Trace-Id"] = proxied.trace_id
+    return Response(
+        content=proxied.content,
+        status_code=proxied.status_code,
+        headers=response_headers,
+    )
 
 
 @app.get("/metrics")
 def prometheus_metrics():
-    from fastapi.responses import Response
     return Response(content=metrics.export(), media_type=CONTENT_TYPE_LATEST)
 
 
@@ -674,7 +913,7 @@ async def get_memory(limit: int = 5, _: None = Depends(verify_api_key)):
         raise HTTPException(status_code=503, detail="Agent mémoire non disponible")
     limit = min(max(1, limit), 100)
     try:
-        entries = memory_agent.retrieve(limit=limit)
+        entries = await memory_agent.retrieve(limit=limit)
         return {"entries": entries, "count": len(entries), "timestamp": utc_now_iso()}
     except Exception as e:
         logger.error("Erreur récupération mémoire : %s", e)
@@ -829,7 +1068,8 @@ async def text_input_stream(input_data: TextInput, _: None = Depends(verify_api_
             )
         except Exception as e:
             logger.exception("stream: exception : %s", e)
-            yield f"data: {json.dumps({'token': '', 'done': True, 'error': str(e)})}\n\n"
+
+        yield f"data: {json.dumps({'token': '', 'done': True, 'error': str(e)})}\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 

@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from common.paths import NERON_ROOT
 
 _RESULT_MARKER = "__NERON_AGENT_SANDBOX_RESULT__"
 _SYSTEMD_USER = "neron-agent"
@@ -25,7 +26,7 @@ class AgentSandbox:
     def __init__(
         self,
         *,
-        project_root: Path | str = Path("/etc/neron"),
+        project_root: Path | str = NERON_ROOT,
         workspace: Path | str | None = None,
         python_executable: str | None = None,
         timeout: int = 30,

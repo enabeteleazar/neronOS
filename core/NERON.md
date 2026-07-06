@@ -201,14 +201,9 @@ Les actions high/critical nécessitent audit ou validation humaine.
 
 # 9. Mémoire
 
-Mémoire longue durée :
-- /etc/neron/obsidian-vault
-
-Mémoire runtime :
-- SQLite
-- Event history
-- Cognitive state
-- Runtime state
+Oblivia est l’unique provider de mémoire. Le Core lui délègue les opérations
+via le provider registry et A2A ; les backends SQLite et Obsidian restent des
+détails internes au service Memory.
 
 La mémoire doit éviter :
 - duplication

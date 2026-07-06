@@ -23,6 +23,11 @@ from core.modules.status import (
     detect_status_intent,
 )
 from core.modules.memory import detect_memory_intent, build_memory_response_async
+from core.infrastructure.registry import service_registry
+from core.infrastructure.topology import build_topology
+from core.goal_engine import GoalRequest, goal_engine
+from core.providers.models import ProviderRequest
+from core.providers.registry import provider_registry
 
 logger = get_logger("core.pipeline.orchestrator")
 
@@ -89,6 +94,7 @@ class CoreOrchestrator:
         goal_orchestrator_factory: Any | None = None,
         goal_execution_engine: Any | None = None,
         goal_background_runner: Any | None = None,
+        goal_engine_instance: Any | None = None,
         runtime_governor: Any | None = None,
         agent_runtime_factory: Any | None = None,
     ) -> None:
@@ -98,6 +104,7 @@ class CoreOrchestrator:
         self._goal_orchestrator_factory = goal_orchestrator_factory
         self._goal_execution_engine = goal_execution_engine
         self._goal_background_runner = goal_background_runner
+        self._goal_engine = goal_engine_instance
         self._runtime_governor = runtime_governor
         self._agent_runtime_factory = agent_runtime_factory
 
@@ -164,7 +171,84 @@ class CoreOrchestrator:
                 complexity="simple",
                 requires_tool=True,
             )
-        elif status_result.get("matched") or intent == Intent.SYSTEM_STATUS:
+        elif intent == Intent.REGISTRY_LIST:
+            decision = OrchestratorDecision(
+                intent=Intent.REGISTRY_LIST.value,
+                selected_route="registry_provider",
+                reason="Demande de liste des services traitée localement par le registre.",
+                complexity="simple",
+                requires_llm=False,
+                requires_timer=False,
+                requires_memory=False,
+                requires_tool=False,
+                requires_resolver=False,
+                requires_goal_pipeline=False,
+                requires_governor=False,
+            )
+        elif intent == Intent.REGISTRY_STATUS:
+            decision = OrchestratorDecision(
+                intent=Intent.REGISTRY_STATUS.value,
+                selected_route="registry_provider",
+                reason="Demande d'etat des services (arrets/en cours) traitee localement par le registre.",
+                complexity="simple",
+                requires_llm=False,
+                requires_timer=False,
+                requires_memory=False,
+                requires_tool=False,
+                requires_resolver=False,
+                requires_goal_pipeline=False,
+                requires_governor=False,
+            )
+        elif intent == Intent.TOPOLOGY_SHOW:
+            decision = OrchestratorDecision(
+                intent=Intent.TOPOLOGY_SHOW.value,
+                selected_route="topology_provider",
+                reason="Demande de topologie du systeme traitee localement par le module de topologie.",
+                complexity="simple",
+                requires_llm=False,
+                requires_timer=False,
+                requires_memory=False,
+                requires_tool=False,
+                requires_resolver=False,
+                requires_goal_pipeline=False,
+                requires_governor=False,
+            )
+        elif intent == Intent.MEMORY_SEARCH:
+            decision = OrchestratorDecision(
+                intent=Intent.MEMORY_SEARCH.value,
+                selected_route="memory_provider",
+                reason="Recherche mémoire traitée via le Provider Registry.",
+                complexity="simple",
+                requires_llm=False,
+                requires_timer=False,
+                requires_memory=True,
+                requires_tool=False,
+                requires_resolver=False,
+                requires_agent_factory=False,
+                requires_goal_pipeline=False,
+                requires_governor=False,
+            )
+        elif intent in {Intent.AGENT_CREATION, Intent.TOOL_CREATION}:
+            decision = OrchestratorDecision(
+                intent=intent.value,
+                selected_route="goal_engine",
+                reason="Objectif de création délégué au Goal Engine foundation.",
+                complexity="complex",
+                requires_goal_pipeline=True,
+                requires_governor=True,
+            )
+        elif _is_goal_engine_request(normalized):
+            decision = OrchestratorDecision(
+                intent="goal_execution",
+                selected_route="goal_engine",
+                reason="Demande explicite d'exécution par agent déléguée au Goal Engine.",
+                complexity="complex",
+                requires_goal_pipeline=True,
+                requires_governor=True,
+            )
+        elif (
+            status_result.get("matched") or intent == Intent.SYSTEM_STATUS
+        ) and not memory_result.get("matched"):
             decision = OrchestratorDecision(
                 intent="status_query",
                 selected_route="status_provider",
@@ -179,7 +263,10 @@ class CoreOrchestrator:
                 requires_goal_pipeline=False,
                 requires_governor=False,
             )
-        elif intent == Intent.IDENTITY_QUERY:
+        elif (
+            intent == Intent.IDENTITY_QUERY
+            and not memory_result.get("matched")
+        ):
             decision = OrchestratorDecision(
                 intent=Intent.IDENTITY_QUERY.value,
                 selected_route="identity_provider",
@@ -212,28 +299,20 @@ class CoreOrchestrator:
                 requires_tool=True,
             )
         elif memory_result.get("matched") or _is_memory_request(normalized):
+            kind = memory_result.get("kind") or "recall"
             decision = OrchestratorDecision(
-                intent="memory_query",
-                selected_route="memory_engine",
-                reason="Demande mémoire traitée localement par memory_module.",
+                intent=f"memory_{kind}",
+                selected_route="memory_provider",
+                reason="Demande mémoire traitée via le Provider Registry.",
                 complexity="simple",
                 requires_memory=True,
                 requires_llm=False,
             )
-        elif intent in {Intent.AGENT_CREATION, Intent.TOOL_CREATION}:
-            decision = OrchestratorDecision(
-                intent=intent.value,
-                selected_route="goal_pipeline",
-                reason="Création explicite déléguée au Goal Engine, autorité canonique du pipeline de construction.",
-                complexity="complex",
-                requires_goal_pipeline=True,
-                requires_governor=True,
-            )
         elif _requires_goal_pipeline(normalized):
             decision = OrchestratorDecision(
                 intent=intent.value,
-                selected_route="goal_pipeline",
-                reason="Demande complexe de construction ou d'exécution structurée déléguée au Goal Engine.",
+                selected_route="goal_engine",
+                reason="Objectif d'exécution structurée délégué au Goal Engine foundation.",
                 complexity="complex",
                 requires_goal_pipeline=True,
                 requires_governor=True,
@@ -324,7 +403,7 @@ class CoreOrchestrator:
                 request_metadata=request_metadata or {},
             )
             error = extra.pop("error", None)
-            model = extra.pop("model", None)
+            model = extra.get("model")
             response_intent = str(extra.pop("resolved_intent", decision.intent))
         except Exception as exc:
             logger.exception(
@@ -337,6 +416,20 @@ class CoreOrchestrator:
             error = str(exc)
             model = None
             response_intent = decision.intent
+
+        logger.info(
+            json.dumps(
+                {
+                    "event": "orchestrator_execution",
+                    "intent": decision.intent,
+                    "selected_route": decision.selected_route,
+                    "reason": decision.reason,
+                    "executor": executor,
+                    "requires_llm": decision.requires_llm,
+                },
+                ensure_ascii=False,
+            )
+        )
 
         return OrchestratorResult(
             response=response,
@@ -436,9 +529,9 @@ class CoreOrchestrator:
             self._log_used("identity_used", decision)
             return await self._execute_identity(query, decision)
 
-        if route == "memory_engine":
-            self._log_used("memory_used", decision)
-            return await self._execute_memory(query)
+        if route == "memory_provider":
+            self._log_used("memory_provider_used", decision)
+            return await self._execute_memory_provider(query, decision)
 
         if route == "resolver":
             self._log_used("resolver_used", decision)
@@ -488,8 +581,26 @@ class CoreOrchestrator:
                 requires_memory=True,
             )
             self._log_used("llm_provider_used", fallback)
-            response = await self.agent_router.route(intent_result, query)
-            return response, "llm_agent", {"resolver_fallback": True}
+            response, executor, metadata = await self._execute_llm_provider(
+                query,
+                fallback,
+            )
+            return response, executor, {**metadata, "resolver_fallback": True}
+
+        if route == "goal_engine":
+            self._log_used("goal_engine_used", decision)
+            goal_request = GoalRequest(
+                objective=query,
+                source=source_channel,
+                user_id=user_id,
+                metadata=request_metadata,
+            )
+            result = await self._get_goal_engine().execute(goal_request)
+            return (
+                result.response,
+                "goal_engine",
+                result.to_orchestrator_metadata(),
+            )
 
         if route == "goal_pipeline":
             self._log_used("goal_pipeline_used", decision)
@@ -535,16 +646,20 @@ class CoreOrchestrator:
                     "routed_before_llm": True,
                 }
             return response, _executor_for_intent(intent_result.intent), {}
+        if route == "registry_provider":
+            self._log_used("registry_used", decision)
+            return await self._execute_registry(query, decision)
+
+        if route == "topology_provider":
+            self._log_used("topology_used", decision)
+            return await self._execute_topology(query, decision)
+
+        if route == "llm_provider":
+            self._log_used("llm_provider_used", decision)
+            return await self._execute_llm_provider(query, decision)
 
         self._log_used("llm_provider_used", decision)
-        if decision.requires_memory:
-            self._log_used("memory_used", decision, usage="context")
-        response = await self.agent_router.route(
-            intent_result,
-            query,
-            source_channel=source_channel,
-        )
-        return response, "llm_agent", {}
+        return await self._execute_llm_provider(query, decision)
 
     async def _execute_status(
         self,
@@ -717,7 +832,273 @@ class CoreOrchestrator:
 
         return result["response"], result["agent"], metadata
 
+    async def _execute_memory_provider(
+        self,
+        query: str,
+        decision: OrchestratorDecision,
+    ) -> tuple[str, str, dict[str, Any]]:
+        memory_result = detect_memory_intent(query)
+        action = _memory_provider_action(query, memory_result, decision)
+        memory_query = (
+            _extract_memory_search_query(query)
+            if action == "search"
+            else _extract_memory_recall_query(query)
+        )
+        remembered_content = _extract_memory_remember_content(query)
+        providers = provider_registry.by_type("memory")
+        provider_info = providers[0] if providers else None
+        provider = provider_registry.get(provider_info.name) if provider_info else None
 
+        metadata = {
+            "selected_route": "memory_provider",
+            "executor": provider_info.name if provider_info else "memory_provider",
+            "fallback_used": False,
+            "retries": 0,
+            "memory_action": action,
+            "memory_query": memory_query if action in {"search", "recall"} else None,
+            "memory_results_count": 0,
+            "llm_used": False,
+            "resolved_intent": (
+                Intent.MEMORY_SEARCH.value if action == "search" else f"memory_{action}"
+            ),
+        }
+
+        if provider is None:
+            return (
+                "Le provider mémoire n'est pas disponible.",
+                "memory_provider",
+                {**metadata, "error": "memory provider unavailable"},
+            )
+
+        payload: dict[str, Any]
+        if action == "remember":
+            payload = {
+                "content": remembered_content,
+                "category": "unknown",
+                "metadata": {"source": "core_orchestrator"},
+            }
+        elif action == "recall":
+            payload = {"query": memory_query, "limit": 5}
+        else:
+            payload = {"query": memory_query, "limit": 5}
+
+        provider_response = await provider_registry.execute_via_a2a(
+            provider.name,
+            ProviderRequest(
+                action=action,
+                payload=payload,
+            )
+        )
+        provider_result = (
+            provider_response.result
+            if isinstance(provider_response.result, dict)
+            else {}
+        )
+        results = _memory_provider_results(provider_response.result)
+        metadata.update(
+            {
+                "executor": provider.name,
+                "memory_results_count": len(results),
+                "provider_status": provider_response.status,
+                "provider_error": provider_response.error,
+                "memory_results": results,
+                "a2a_used": True,
+                "memory_answer": provider_result.get("answer"),
+                "memory_facts": provider_result.get("facts") or [],
+            }
+        )
+        if action == "remember":
+            metadata["memory_content"] = remembered_content
+
+        if provider_response.error:
+            return (
+                f"Erreur du provider mémoire : {provider_response.error}",
+                provider.name,
+                {**metadata, "error": provider_response.error},
+            )
+
+        if action == "remember":
+            provider_metadata = provider_result.get("metadata") or {}
+            return (
+                str(
+                    provider_metadata.get("natural_response")
+                    or f"C’est mémorisé : {remembered_content}"
+                ),
+                provider.name,
+                metadata,
+            )
+
+        if action == "forget":
+            forgotten = int(provider_result.get("forgotten") or 0)
+            metadata["memory_forgotten_count"] = forgotten
+            return (
+                "C’est oublié." if forgotten else "Je n’ai trouvé aucune connaissance à oublier.",
+                provider.name,
+                metadata,
+            )
+
+        if provider_result.get("answer"):
+            return (
+                str(provider_result["answer"]),
+                provider.name,
+                metadata,
+            )
+
+        if not results:
+            return (
+                f"Je n’ai trouvé aucun souvenir correspondant à « {memory_query} ».",
+                provider.name,
+                metadata,
+            )
+
+        header = (
+            f"J’ai trouvé {len(results)} résultat en mémoire :"
+            if len(results) == 1
+            else f"J’ai trouvé {len(results)} résultats en mémoire :"
+        )
+        lines = [f"- {item['content']}" for item in results]
+        return "\n".join([header, *lines]), provider.name, metadata
+
+    async def _execute_llm_provider(
+        self,
+        query: str,
+        decision: OrchestratorDecision,
+    ) -> tuple[str, str, dict[str, Any]]:
+        providers = provider_registry.by_type("llm")
+        provider_info = providers[0] if providers else None
+        provider = provider_registry.get(provider_info.name) if provider_info else None
+
+        metadata = {
+            "selected_route": "llm_provider",
+            "executor": provider_info.name if provider_info else "llm",
+            "fallback_used": False,
+            "retries": 0,
+            "provider_status": provider_info.status if provider_info else "unavailable",
+            "llm_used": True,
+            "llm_provider": provider_info.name if provider_info else "llm",
+            "llm_action": "generate",
+        }
+
+        if provider is None:
+            return (
+                "Le provider LLM n'est pas disponible.",
+                "llm",
+                {**metadata, "error": "llm provider unavailable"},
+            )
+
+        provider_response = await provider.execute(
+            ProviderRequest(
+                action="generate",
+                payload={
+                    "prompt": query,
+                    "task_type": "chat",
+                    "context": {},
+                    "model_preference": "auto",
+                },
+            )
+        )
+        result = provider_response.result if isinstance(provider_response.result, dict) else {}
+        model = str(result.get("model") or "")
+        metadata.update(
+            {
+                "executor": provider.name,
+                "provider_status": provider_response.status,
+                "provider_error": provider_response.error,
+                "llm_provider": provider.name,
+                "model": model or None,
+                "latency_ms": result.get("latency_ms"),
+                "warning": result.get("warning"),
+            }
+        )
+
+        if provider_response.error:
+            return (
+                f"Erreur du provider LLM : {provider_response.error}",
+                provider.name,
+                {**metadata, "error": provider_response.error},
+            )
+
+        return str(result.get("text") or ""), provider.name, metadata
+
+
+    async def _execute_registry(
+        self,
+        query: str,
+        decision: OrchestratorDecision,
+    ) -> tuple[str, str, dict[str, Any]]:
+        """Handle registry queries."""
+        # Determine what the user wants
+        normalized = _normalize(query)
+        services = service_registry.list_services()
+        if not services:
+            response = "Aucun service enregistré."
+        else:
+            target = _registry_target(normalized)
+            if target is not None:
+                matching = [
+                    service
+                    for service in services
+                    if _service_matches_registry_target(service, target)
+                ]
+                if matching:
+                    service = matching[0]
+                    response = (
+                        f"Le service {service['service_name']} fournit {target} "
+                        f"(statut : {service.get('status', 'unknown')})."
+                    )
+                else:
+                    response = f"Aucun service enregistré ne fournit {target}."
+            # Check if user asks for stopped services
+            elif any(
+                k in normalized
+                for k in ["arrete", "hors ligne", "stop", "down"]
+            ):
+                stopped = [s for s in services if s.get("status") != "healthy"]
+                if not stopped:
+                    response = "Tous les services sont en cours d'exécution (healthy)."
+                else:
+                    lines = [f"- {s['service_name']} : {s.get('status', 'inconnu')}" for s in stopped]
+                    response = "Services arrêtés :\n" + "\n".join(lines)
+            else:
+                # Default: list all services with status
+                lines = [f"- {s['service_name']} : {s.get('status', 'inconnu')}" for s in services]
+                response = "Services enregistrés :\n" + "\n".join(lines)
+        metadata = {
+            "selected_route": "registry_provider",
+            "executor": "registry_module",
+            "fallback_used": False,
+            "retries": 0,
+        }
+        return response, "registry_module", metadata
+
+    async def _execute_topology(
+        self,
+        query: str,
+        decision: OrchestratorDecision,
+    ) -> tuple[str, str, dict[str, Any]]:
+        """Handle topology queries."""
+        topology = build_topology(service_registry)
+        status = topology.get("status", "inconnu")
+        service_count = topology.get("service_count", 0)
+        healthy = topology.get("healthy_count", 0)
+        degraded = topology.get("degraded_count", 0)
+        offline = topology.get("offline_count", 0)
+        # Build a friendly summary
+        lines = []
+        for svc in topology.get("services", []):
+            lines.append(f"- {svc['name']} ({svc['status']}) : {svc['host']}:{svc['port']}")
+        detail = "\n".join(lines) if lines else "Aucun service."
+        response = (f"Topologie du système :\n"
+                    f"État global : {status}\n"
+                    f"Services : {service_count} (sains : {healthy}, dégradés : {degraded}, hors ligne : {offline})\n"
+                    f"Détail :\n{detail}")
+        metadata = {
+            "selected_route": "topology_provider",
+            "executor": "topology_module",
+            "fallback_used": False,
+            "retries": 0,
+        }
+        return response, "topology_module", metadata
     def _get_capability_resolver(self) -> Any:
         if self._capability_resolver is None:
             from modules.capabilities.resolver import CapabilityResolver
@@ -752,6 +1133,11 @@ class CoreOrchestrator:
 
             self._goal_background_runner = get_goal_background_runner()
         return self._goal_background_runner
+
+    def _get_goal_engine(self) -> Any:
+        if self._goal_engine is None:
+            self._goal_engine = goal_engine
+        return self._goal_engine
 
     def _get_agent_runtime(self) -> Any:
         if self._agent_runtime_factory is None:
@@ -831,6 +1217,38 @@ def _normalize(text: str) -> str:
     return " ".join(
         normalized.replace("'", " ").replace("’", " ").replace("-", " ").split()
     )
+
+
+def _registry_target(normalized_query: str) -> str | None:
+    if "home assistant" in normalized_query:
+        return "Home Assistant"
+    if "memoire" in normalized_query:
+        return "la mémoire"
+    if re.search(r"\bllms?\b", normalized_query):
+        return "les LLM"
+    return None
+
+
+def _service_matches_registry_target(
+    service: dict[str, Any],
+    target: str,
+) -> bool:
+    name = str(service.get("service_name", "")).lower()
+    capabilities = {
+        str(capability).lower()
+        for capability in service.get("capabilities", [])
+    }
+    if target == "Home Assistant":
+        return name == "homeassistant" or "home_automation" in capabilities
+    if target == "la mémoire":
+        return name == "memory" or bool(
+            capabilities & {"memory", "sqlite", "obsidian", "context_storage"}
+        )
+    if target == "les LLM":
+        return name == "llm" or bool(
+            capabilities & {"text_generation", "chat", "completion"}
+        )
+    return False
 
 
 def _parse_agent_invocation(query: str) -> AgentInvocation | None:
@@ -932,6 +1350,188 @@ def _is_memory_request(query: str) -> bool:
     )
 
 
+def _extract_memory_search_query(query: str) -> str:
+    normalized = _normalize(query).strip(" ?!.:,;")
+    patterns = (
+        r"^qu\s+as\s+tu\s+memorise\s+sur\s+(.+)$",
+        r"^que\s+sais\s+tu\s+sur\s+(.+)$",
+        r"^retrouve\s+mes\s+notes\s+sur\s+(.+)$",
+        r"^(?:recherche|cherche|retrouve)\s+(?:dans\s+ta\s+memoire\s+)?(.+)$",
+    )
+    for pattern in patterns:
+        match = re.match(pattern, normalized)
+        if match:
+            value = match.group(1).strip(" ?!.:,;")
+            if value:
+                return value
+    return normalized or query.strip()
+
+
+def _extract_memory_recall_query(query: str) -> str:
+    normalized = " ".join(
+        re.sub(r"[^a-z0-9 ]+", " ", _normalize(query)).split()
+    )
+    patterns = (
+        r"^oublie\s+ce\s+que\s+tu\s+sais\s+sur\s+(.+)$",
+        r"^oublie\s+que\s+(.+)$",
+        r"^efface\s+de\s+ta\s+memoire\s+(.+)$",
+        r"^qu\s+as\s+tu\s+memorise\s+sur\s+(.+)$",
+        r"^que\s+sais\s+tu\s+sur\s+(.+)$",
+        r"^tu\s+te\s+souviens\s+(?:de|sur)?\s*(.+)$",
+        r"^te\s+rappelles\s+tu\s+(?:de|sur)?\s*(.+)$",
+    )
+    for pattern in patterns:
+        match = re.match(pattern, normalized)
+        if match:
+            value = match.group(1).strip(" ?!.:,;")
+            if value:
+                return value
+    knowledge_questions = (
+        "qui est papa",
+        "comment s appelle ma femme",
+        "qu est ce que j aime boire",
+        "que j aime boire",
+        "comment je m appelle",
+        "qui est mon fils",
+        "ou est ce que j habite",
+        "ou est ce que je travaille",
+        "ou est ce que j habitais avant",
+        "ou habitais je avant",
+        "ou ai je vecu",
+        "dans quelles villes ai je vecu",
+        "ou travaillais je avant",
+        "comment je m appelais avant",
+        "comment s appelait ma femme avant",
+        "j aime quoi",
+        "qui suis je",
+        "parle moi de moi",
+        "presente moi",
+        "que sais tu de moi",
+        "fais un resume de ce que tu sais sur moi",
+        "qui est ma femme",
+        "qui est mon epouse",
+        "ou ai je travaille",
+        "qu est ce que j aime",
+        "qu est ce que j aimais avant",
+        "quels anciens souvenirs possedes tu",
+        "quelles informations ne sont plus actuelles",
+        "quelles informations sont obsoletes",
+        "montre moi tout ce que tu sais",
+        "montre toute ma memoire",
+        "quels souvenirs possedes tu",
+        "combien de souvenirs as tu sur moi",
+        "quels types d informations connais tu",
+        "quels predicats connais tu sur moi",
+        "ai je des informations contradictoires",
+        "as tu detecte des conflits",
+        "y a t il des souvenirs retractes",
+        "as tu des informations douteuses",
+        "y a t il des donnees obsoletes",
+        "qui habite avec moi",
+        "qui depend de moi",
+        "qui fait partie de mon foyer",
+        "si je demenage qui demenage probablement avec moi",
+        "qui est lie a moi",
+        "qui fait partie de ma famille",
+        "qui partage ma vie",
+        "tu me connais bien",
+        "est ce que tu te souviens de moi",
+        "as tu appris des choses sur moi",
+        "qu est ce que tu retiens principalement de moi",
+        "qu est ce qui me caracterise",
+        "que pourrais tu raconter sur moi a quelqu un",
+        "si tu devais me presenter que dirais tu",
+        "quelle est la derniere chose importante que tu as apprise sur moi",
+        "quel est mon telephone",
+        "quel telephone j utilise",
+        "quel smartphone ai je",
+        "quels appareils je possede",
+        "qu est ce que j ai achete",
+        "tu te souviens de mon telephone",
+        "combien ai je d enfants",
+        "comment s appellent mes enfants",
+        "qui sont mes enfants",
+    )
+    if any(pattern in normalized for pattern in knowledge_questions):
+        return normalized
+    if re.fullmatch(r"qui est [a-z][a-z0-9 ]*", normalized):
+        return normalized
+    return ""
+
+
+def _extract_memory_remember_content(query: str) -> str:
+    normalized = query.strip()
+    cleaned = _normalize(query)
+    prefixes = (
+        "memorise que",
+        "retiens que",
+        "souviens toi que",
+        "note que",
+        "garde en memoire que",
+    )
+    for prefix in prefixes:
+        if cleaned.startswith(prefix):
+            words = normalized.split()
+            return " ".join(words[len(prefix.split()) :]).strip(" .")
+    return normalized
+
+
+def _memory_provider_action(
+    query: str,
+    memory_result: dict[str, Any],
+    decision: OrchestratorDecision,
+) -> str:
+    if decision.intent == Intent.MEMORY_SEARCH.value:
+        return "search"
+    kind = str(memory_result.get("kind") or "")
+    if kind in {"remember", "recall", "search", "forget", "status"}:
+        return kind
+    normalized = _normalize(query)
+    if any(
+        token in normalized
+        for token in ("memorise", "retiens", "souviens toi que", "note que")
+    ):
+        return "remember"
+    return "recall"
+
+
+def _memory_provider_results(value: Any) -> list[dict[str, str]]:
+    if isinstance(value, dict):
+        value = value.get("results") or []
+    if not isinstance(value, list):
+        return []
+
+    results: list[dict[str, str]] = []
+    for item in value:
+        if hasattr(item, "model_dump"):
+            item = item.model_dump(mode="json")
+        if not isinstance(item, dict):
+            continue
+        record = item.get("record")
+        if hasattr(record, "model_dump"):
+            record = record.model_dump(mode="json")
+        if not isinstance(record, dict):
+            continue
+        content = _memory_result_content(str(record.get("content") or ""))
+        if not content:
+            continue
+        results.append(
+            {
+                "content": content,
+                "backend": str(item.get("backend") or ""),
+                "score": str(item.get("score") or ""),
+            }
+        )
+    return results
+
+
+def _memory_result_content(content: str, limit: int = 220) -> str:
+    cleaned = " ".join(content.replace("\n", " ").split())
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[: limit - 1].rstrip() + "…"
+
+
 def _is_self_model_request(query: str) -> bool:
     return any(
         token in query
@@ -973,6 +1573,19 @@ def _requires_goal_pipeline(query: str) -> bool:
             "construis ",
             "construire ",
             "construction ",
+        )
+    )
+
+
+def _is_goal_engine_request(query: str) -> bool:
+    return any(
+        token in query
+        for token in (
+            "utilise un agent",
+            "utilise l agent",
+            "utiliser un agent",
+            "agent de diagnostic",
+            "prepare un plan pour creer un agent",
         )
     )
 
