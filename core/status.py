@@ -4,8 +4,38 @@
 from __future__ import annotations
 
 import psutil
-from agents.builtin.automation.watchdog_agent import get_health_score, get_status as _get_status
 from modules.scheduler import get_jobs
+
+
+def _get_status() -> dict:
+    return {
+        "cpu_pct": psutil.cpu_percent(),
+        "ram_pct": psutil.virtual_memory().percent,
+        "disk_pct": psutil.disk_usage("/").percent,
+        "process_ram_mb": 0,
+    }
+
+
+def get_health_score() -> dict:
+    cpu = psutil.cpu_percent()
+    ram = psutil.virtual_memory().percent
+
+    score = 100
+
+    if cpu > 90:
+        score -= 30
+    elif cpu > 75:
+        score -= 15
+
+    if ram > 90:
+        score -= 30
+    elif ram > 75:
+        score -= 15
+
+    return {
+        "score": max(score, 0),
+        "level": "healthy" if score >= 80 else "warning"
+    }
 
 
 def check_all_improved() -> dict:
