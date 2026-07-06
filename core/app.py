@@ -86,14 +86,6 @@ from agents.builtin.dev.code_audit_agent import CodeAuditAgent
 
 # AUTOMATION
 from agents.builtin.automation.ha_agent import HAAgent
-from agents.builtin.automation.watchdog_agent import (
-    send_watchdog_notification,
-    setup as watchdog_setup,
-    start_watchdog,
-    start_watchdog_bot,
-    stop_watchdog,
-    stop_watchdog_bot,
-    world_model,
 )
 
 # CORE
@@ -497,13 +489,6 @@ async def lifespan(app: FastAPI):
         else:
             logger.info("Telegram desactive ou token non configure")
 
-        if getattr(settings, "WATCHDOG_ENABLED", False):
-            watchdog_setup(
-                agents={"llm": llm_agent, "stt": stt_agent, "tts": tts_agent},
-                notify_fn=send_watchdog_notification,
-            )
-            await start_watchdog()
-            await start_watchdog_bot()
 
         _registry_stale_task = asyncio.create_task(_registry_stale_loop())
         logger.info("Registry stale detector demarre")
@@ -570,15 +555,6 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.warning("Erreur arrêt Gateway WebSocket : %s", e)
 
-        if getattr(settings, "WATCHDOG_ENABLED", False):
-            try:
-                await stop_watchdog_bot()
-            except Exception as e:
-                logger.warning("Erreur arrêt watchdog bot : %s", e)
-
-            try:
-                await stop_watchdog()
-            except Exception as e:
                 logger.warning("Erreur arrêt watchdog : %s", e)
 
         if telegram_enabled and telegram_token not in ("", "votre_token_ici", None):
