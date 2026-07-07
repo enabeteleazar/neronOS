@@ -86,7 +86,6 @@ from agents.builtin.dev.code_audit_agent import CodeAuditAgent
 
 # AUTOMATION
 from agents.builtin.automation.ha_agent import HAAgent
-)
 
 # CORE
 from agents.builtin.core.llm_agent import LLMAgent
