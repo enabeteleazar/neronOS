@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import psutil
+import time
 from modules.scheduler import get_jobs
 
 
@@ -14,6 +15,33 @@ def _get_status() -> dict:
         "disk_pct": psutil.disk_usage("/").percent,
         "process_ram_mb": 0,
     }
+
+
+def get_status() -> dict:
+    """Return a dict with system status for legacy compatibility."""
+    try:
+        boot_time = psutil.boot_time()
+        uptime_s = int(time.time() - boot_time)
+    except Exception:
+        uptime_s = 0
+
+    mem = psutil.virtual_memory()
+    ram_used_mb = int(mem.used / 1024 / 1024)
+
+    # Get process memory for current process
+    try:
+        process = psutil.Process()
+        process_ram_mb = int(process.memory_info().rss / 1024 / 1024)
+    except Exception:
+        process_ram_mb = 0
+
+    base = _get_status()
+    base.update({
+        "uptime_s": uptime_s,
+        "ram_used_mb": ram_used_mb,
+        "process_ram_mb": process_ram_mb,  # override the 0 from _get_status
+    })
+    return base
 
 
 def get_health_score() -> dict:
