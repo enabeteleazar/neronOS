@@ -459,6 +459,8 @@ async def lifespan(app: FastAPI):
                 agent_router=agent_router,
                 session_store=_sessions,
                 skill_registry=_skills,
+                stt_agent=stt_agent,
+                tts_agent=tts_agent,
             )
 
             _gateway_task = asyncio.create_task(_gw.start())

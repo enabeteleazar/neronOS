@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import json
 import logging
 import uuid
@@ -22,6 +24,12 @@ if TYPE_CHECKING:
     from core.pipeline.routing.agent_router import AgentRouter
     from modules.sessions import SessionStore
     from modules.skills import SkillRegistry
+    from agents.builtin.io.stt_agent import STTAgent
+    from agents.builtin.io.tts_agent import TTSAgent
+
+# Taille max d'un audio décodé (base64 -> bytes), avant délégation à STTAgent
+# (qui applique lui-même AUDIO_MAX_MB — cette limite protège juste le decode).
+MAX_VOICE_AUDIO_BYTES = 15 * 1024 * 1024  # 15 MB
 
 logger = logging.getLogger("neron.gateway")
 
@@ -106,24 +114,32 @@ class NeronGateway:
         agent_router:     "AgentRouter"  | None = None,
         session_store:    "SessionStore" | None = None,
         skill_registry:   "SkillRegistry"| None = None,
+        stt_agent:        "STTAgent"     | None = None,
+        tts_agent:        "TTSAgent"     | None = None,
     ) -> None:
-        self.config   = config or GatewayConfig()
-        self.sessions = session_store  or SessionStore()
-        self.skills   = skill_registry or SkillRegistry()
-        self.agent    = agent_router   or AgentRouter(
+        self.config    = config or GatewayConfig()
+        self.sessions  = session_store  or SessionStore()
+        self.skills    = skill_registry or SkillRegistry()
+        self.agent     = agent_router   or AgentRouter(
             sessions=self.sessions,
             skills=self.skills,
         )
+        # Injectés depuis app.py (globals stt_agent/tts_agent déjà chargés
+        # au démarrage) — peuvent rester None si STT/TTS désactivés.
+        self.stt_agent = stt_agent
+        self.tts_agent = tts_agent
         self._clients:  dict[str, ConnectedClient] = {}
         self._handlers: dict[str, HandlerType]     = {
-            "ping":         self._ping,
-            "chat.send":    self._chat_send,
-            "agent.run":    self._agent_run,
-            "session.new":  self._session_new,
-            "session.list": self._session_list,
-            "session.get":  self._session_get,
-            "skill.call":   self._skill_call,
-            "skill.list":   self._skill_list,
+            "ping":              self._ping,
+            "chat.send":         self._chat_send,
+            "agent.run":         self._agent_run,
+            "session.new":       self._session_new,
+            "session.list":      self._session_list,
+            "session.get":       self._session_get,
+            "skill.call":        self._skill_call,
+            "skill.list":        self._skill_list,
+            "voice.transcribe":  self._voice_transcribe,
+            "voice.send":        self._voice_send,
         }
 
     # ── Entrée serveur ──────────────────────────────────────────────────────
@@ -396,6 +412,29 @@ class NeronGateway:
             )
             return
 
+        await self._run_text_and_emit(client, session_id, message)
+
+    async def _run_text_and_emit(
+        self,
+        client: ConnectedClient,
+        session_id: str,
+        message: str,
+        extra_usage: dict | None = None,
+    ) -> "object | None":
+        """
+        Fait passer un texte par l'orchestrateur et émet 'agent.token' /
+        'agent.done' — logique partagée entre chat.send et voice.send.
+
+        Args:
+            client: Client destinataire des events.
+            session_id: Session concernée.
+            message: Texte à traiter (déjà transcrit, le cas échéant).
+            extra_usage: Champs additionnels à fusionner dans 'usage'
+                (ex : infos de transcription pour voice.send).
+
+        Returns:
+            Le CoreResult de l'orchestrateur si succès, sinon None.
+        """
         try:
             from core.pipeline.orchestrator import get_core_orchestrator
 
@@ -415,19 +454,23 @@ class NeronGateway:
                     },
                 ),
             )
+            usage = {
+                "intent": result.intent,
+                "selected_route": result.decision.selected_route,
+                "execution_time_ms": result.elapsed_ms,
+            }
+            if extra_usage:
+                usage.update(extra_usage)
             await self._send(
                 client.ws,
                 _event("agent.done", {
                     "session_id": session_id,
-                    "usage": {
-                        "intent": result.intent,
-                        "selected_route": result.decision.selected_route,
-                        "execution_time_ms": result.elapsed_ms,
-                    },
+                    "usage": usage,
                 }),
             )
+            return result
         except Exception as e:
-            logger.exception("[%s] erreur chat_send", client.client_id)
+            logger.exception("[%s] erreur run_text_and_emit", client.client_id)
             await self._send(
                 client.ws,
                 _event("agent.error", {
@@ -435,6 +478,7 @@ class NeronGateway:
                     "message":    str(e),
                 }),
             )
+            return None
 
     async def _agent_run(self, client: ConnectedClient, params: dict) -> None:
         """
@@ -464,6 +508,184 @@ class NeronGateway:
                     "message":    str(e),
                 }),
             )
+
+    def _decode_voice_audio(self, params: dict) -> tuple[bytes, str]:
+        """
+        Décode et valide l'audio base64 reçu en params.
+
+        Args:
+            params: Doit contenir 'audio_b64'. 'filename' optionnel
+                (défaut 'audio.wav') — son extension détermine le format
+                attendu par STTAgent (.wav/.mp3/.m4a/.ogg/.flac/.webm).
+
+        Returns:
+            (audio_bytes, filename)
+
+        Raises:
+            ValueError: audio_b64 manquant, invalide, ou trop volumineux.
+        """
+        audio_b64 = params.get("audio_b64")
+        if not audio_b64:
+            raise ValueError("audio_b64 requis")
+
+        filename = params.get("filename") or "audio.wav"
+
+        try:
+            audio_bytes = base64.b64decode(audio_b64, validate=True)
+        except (binascii.Error, ValueError) as e:
+            raise ValueError(f"audio_b64 invalide : {e}") from e
+
+        if not audio_bytes:
+            raise ValueError("audio décodé vide")
+
+        if len(audio_bytes) > MAX_VOICE_AUDIO_BYTES:
+            raise ValueError(
+                f"audio trop volumineux : {len(audio_bytes)} > "
+                f"{MAX_VOICE_AUDIO_BYTES} bytes"
+            )
+
+        return audio_bytes, filename
+
+    async def _voice_transcribe(self, client: ConnectedClient, params: dict) -> dict:
+        """
+        Transcrit un audio en texte, sans passer par l'orchestrateur.
+
+        Args:
+            client: Client demandeur.
+            params: 'audio_b64' (requis), 'filename' (optionnel).
+
+        Returns:
+            Transcription et métadonnées STT.
+
+        Raises:
+            ValueError: STT indisponible, audio invalide, ou échec transcription.
+        """
+        del client  # non utilisé
+        if self.stt_agent is None:
+            raise ValueError("STT non disponible (désactivé dans cette configuration)")
+
+        audio_bytes, filename = self._decode_voice_audio(params)
+        result = await self.stt_agent.transcribe(audio_bytes, filename)
+        if not result.success:
+            raise ValueError(f"STT indisponible : {result.error}")
+
+        return {
+            "text":           result.content,
+            "language":       result.metadata.get("language"),
+            "stt_latency_ms": result.latency_ms,
+        }
+
+    async def _voice_send(self, client: ConnectedClient, params: dict) -> None:
+        """
+        Transcrit un audio puis exécute le pipeline complet (équivalent
+        vocal de chat.send) — émet 'voice.transcription', puis
+        'agent.token'/'agent.done', et optionnellement 'voice.audio'
+        (réponse synthétisée en TTS) si 'synthesize' est vrai.
+
+        Args:
+            client: Client destinataire des events.
+            params: 'audio_b64' (requis), 'filename' (optionnel),
+                'session_id' (optionnel), 'synthesize' (bool, défaut False).
+        """
+        session_id = params.get("session_id", "default")
+
+        if self.stt_agent is None:
+            await self._send(
+                client.ws,
+                _event("agent.error", {
+                    "session_id": session_id,
+                    "message": "STT non disponible (désactivé dans cette configuration)",
+                }),
+            )
+            return
+
+        try:
+            audio_bytes, filename = self._decode_voice_audio(params)
+        except ValueError as e:
+            await self._send(
+                client.ws,
+                _event("agent.error", {"session_id": session_id, "message": str(e)}),
+            )
+            return
+
+        stt_result = await self.stt_agent.transcribe(audio_bytes, filename)
+        if not stt_result.success:
+            await self._send(
+                client.ws,
+                _event("agent.error", {
+                    "session_id": session_id,
+                    "message": f"STT indisponible : {stt_result.error}",
+                }),
+            )
+            return
+
+        transcription = stt_result.content
+        if not transcription:
+            await self._send(
+                client.ws,
+                _event("agent.error", {
+                    "session_id": session_id,
+                    "message": "Transcription vide",
+                }),
+            )
+            return
+
+        await self._send(
+            client.ws,
+            _event("voice.transcription", {
+                "session_id":     session_id,
+                "text":           transcription,
+                "language":       stt_result.metadata.get("language"),
+                "stt_latency_ms": stt_result.latency_ms,
+            }),
+        )
+
+        result = await self._run_text_and_emit(
+            client,
+            session_id,
+            transcription,
+            extra_usage={
+                "transcription":  transcription,
+                "stt_latency_ms": stt_result.latency_ms,
+            },
+        )
+
+        synthesize = bool(params.get("synthesize", False))
+        if not synthesize or result is None:
+            return
+
+        if self.tts_agent is None:
+            await self._send(
+                client.ws,
+                _event("voice.error", {
+                    "session_id": session_id,
+                    "message": "TTS non disponible (désactivé dans cette configuration)",
+                }),
+            )
+            return
+
+        tts_result = await self.tts_agent.synthesize(result.response)
+        if not tts_result.success:
+            await self._send(
+                client.ws,
+                _event("voice.error", {
+                    "session_id": session_id,
+                    "message": f"TTS indisponible : {tts_result.error}",
+                }),
+            )
+            return
+
+        await self._send(
+            client.ws,
+            _event("voice.audio", {
+                "session_id":     session_id,
+                "audio_b64":      base64.b64encode(
+                    tts_result.metadata["audio_bytes"]
+                ).decode("ascii"),
+                "mimetype":       tts_result.metadata.get("mimetype", "audio/wav"),
+                "tts_latency_ms": tts_result.latency_ms,
+            }),
+        )
 
     async def _skill_list(self, client: ConnectedClient, params: dict) -> dict:
         """
