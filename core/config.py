@@ -207,7 +207,7 @@ class Config:
 
     # ── Deprecated ────────────────────────────────────────────────────────
     # NERON_WATCHDOG_URL : supprimé — system_agent.py appelle maintenant
-    # les fonctions natives de watchdog_agent.py directement.
+    # les fonctions natives de statut système directement.
 
 
 def _validate_config() -> None:

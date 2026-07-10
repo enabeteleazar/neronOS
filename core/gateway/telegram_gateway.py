@@ -25,7 +25,7 @@ from telegram.ext import (
 
 from core.config import settings
 from core.constants import CODE_KEYWORDS, NERON_HELP_TEXT
-from agents.builtin.automation.watchdog_agent import get_anomalies, get_health_score, get_status
+from core.status import get_health_score, get_status
 
 logger = logging.getLogger("neron.gateway.telegram")
 
@@ -417,12 +417,7 @@ class TelegramGateway:
         if not self._is_authorized(update):
             return await self._unauthorized(update)
 
-        # Signal d'activité pour le watchdog
-        try:
-            from agents.builtin.automation import watchdog_agent as _wdog
-            _wdog._last_conversation = time.monotonic()
-        except Exception:
-            pass
+        user_message = update.message.text
 
         user_message = update.message.text
         await update.message.chat.send_action("typing")
