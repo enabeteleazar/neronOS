@@ -101,7 +101,7 @@ from agents.builtin.communication.web_agent import WebAgent
 
 # IO
 from agents.builtin.io.stt_agent import STTAgent, load_model
-from agents.builtin.io.tts_agent import TTSAgent
+from agents.builtin.io.tts_agent import TTSAgent, load_engine
 
 
 from core.config import settings
@@ -387,6 +387,10 @@ async def lifespan(app: FastAPI):
             logger.warning("STT indisponible au démarrage : %s", exc)
 
         tts_agent = TTSAgent()
+        try:
+            await asyncio.get_event_loop().run_in_executor(None, load_engine)
+        except Exception as exc:
+            logger.warning("TTS indisponible au démarrage : %s", exc)
 
         code_agent = CodeAgent()
         code_audit_agent = CodeAuditAgent()
