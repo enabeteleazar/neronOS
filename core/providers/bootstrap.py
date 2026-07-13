@@ -5,7 +5,6 @@ import logging
 from .llm import LLMProvider
 from .memory import ObliviaProvider
 from .registry import ProviderRegistry, provider_registry
-from integrations.homeassistant.provider import HomeAssistantProvider
 
 logger = logging.getLogger("core.providers")
 
@@ -24,6 +23,8 @@ def ensure_default_providers(
         logger.info("Provider registered: llm")
 
     if registry.get("homeassistant") is None:
+        from integrations.homeassistant.provider import HomeAssistantProvider
+
         registry.register(HomeAssistantProvider())
         logger.info("Provider registered: homeassistant")
 
