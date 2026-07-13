@@ -100,8 +100,8 @@ from agents.builtin.communication.telegram_agent import (
 from agents.builtin.communication.web_agent import WebAgent
 
 # IO
-from agents.builtin.io.stt_agent import STTAgent, load_model
-from agents.builtin.io.tts_agent import TTSAgent, load_engine
+from agents.builtin.io.voice_proxy import STTAgentProxy as STTAgent
+from agents.builtin.io.voice_proxy import TTSAgentProxy as TTSAgent
 
 
 from core.config import settings
@@ -381,14 +381,13 @@ async def lifespan(app: FastAPI):
         ha_agent = HAAgent()
 
         stt_agent = STTAgent()
-        try:
-            await asyncio.get_event_loop().run_in_executor(None, load_model)
-        except Exception as exc:
-            logger.warning("STT indisponible au démarrage : %s", exc)
+        if not await stt_agent.check_connection():
+            logger.warning("Voice service (STT) injoignable au démarrage sur port 8045")
 
-        tts_agent = TTSAgent()
         try:
-            await asyncio.get_event_loop().run_in_executor(None, load_engine)
+            tts_agent = TTSAgent()
+            if not await tts_agent.check_connection():
+                logger.warning("Voice service (TTS) injoignable au démarrage")
         except Exception as exc:
             logger.warning("TTS indisponible au démarrage : %s", exc)
 
