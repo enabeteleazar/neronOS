@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from .llm import LLMProvider
+from llm.provider import LLMProvider
 from .memory import ObliviaProvider
 from .registry import ProviderRegistry, provider_registry
 
