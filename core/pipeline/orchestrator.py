@@ -4,7 +4,6 @@ import json
 import re
 import shlex
 import time
-import unicodedata
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -12,6 +11,7 @@ from agents.builtin.base_agent import get_logger
 from modules.capabilities.models import CapabilityRequest
 from core.constants import NERON_HELP_TEXT
 from core.pipeline.intent.intent_router import Intent, IntentResult, IntentRouter
+from core.pipeline.nlp.french_normalizer import normalize_text
 from core.pipeline.routing.agent_router import AgentRouter
 from core.modules.timer import detect_timer_intent, build_timer_response
 from core.modules.identity import (
@@ -114,13 +114,14 @@ class CoreOrchestrator:
         *,
         explicit_route: str | None = None,
     ) -> tuple[OrchestratorDecision, IntentResult]:
-        intent_result = await self.intent_router.route(query)
+        routing_query = _normalize(query)
+        intent_result = await self.intent_router.route(routing_query)
         intent = intent_result.intent
-        normalized = _normalize(query)
+        normalized = routing_query
         complexity = _complexity(query)
-        timer_result = detect_timer_intent(query)
-        status_result = detect_status_intent(query)
-        memory_result = detect_memory_intent(query)
+        timer_result = detect_timer_intent(routing_query)
+        status_result = detect_status_intent(routing_query)
+        memory_result = detect_memory_intent(routing_query)
         agent_invocation = _parse_agent_invocation(query)
 
         if normalized == "/help":
@@ -353,6 +354,7 @@ class CoreOrchestrator:
                     "event": "orchestrator_decision",
                     **decision.to_dict(),
                     "confidence": intent_result.confidence_score,
+                    "normalized_query": routing_query,
                 },
                 ensure_ascii=False,
             )
@@ -383,6 +385,7 @@ class CoreOrchestrator:
         del session_id
         started = time.monotonic()
         query = query.strip()
+        normalized_query = _normalize(query)
         decision, intent_result = await self.decide(
             query,
             explicit_route=explicit_route,
@@ -441,7 +444,10 @@ class CoreOrchestrator:
             error=error,
             model=model,
             elapsed_ms=round((time.monotonic() - started) * 1000, 2),
-            metadata=extra,
+            metadata={
+                **extra,
+                "normalized_query": normalized_query,
+            },
         )
 
     async def run_goal(
@@ -1210,13 +1216,7 @@ class AgentInvocation:
 
 
 def _normalize(text: str) -> str:
-    normalized = unicodedata.normalize("NFD", text.lower())
-    normalized = "".join(
-        char for char in normalized if unicodedata.category(char) != "Mn"
-    )
-    return " ".join(
-        normalized.replace("'", " ").replace("’", " ").replace("-", " ").split()
-    )
+    return normalize_text(text)
 
 
 def _registry_target(normalized_query: str) -> str | None:

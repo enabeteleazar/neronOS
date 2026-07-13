@@ -22,4 +22,10 @@ def ensure_default_providers(
         registry.register(LLMProvider())
         logger.info("Provider registered: llm")
 
+    if registry.get("homeassistant") is None:
+        from integrations.homeassistant.provider import HomeAssistantProvider
+
+        registry.register(HomeAssistantProvider())
+        logger.info("Provider registered: homeassistant")
+
     return registry

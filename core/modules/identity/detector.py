@@ -1,14 +1,8 @@
-import re
-import unicodedata
+from core.pipeline.nlp.french_normalizer import normalize_text
 
 
 def normalize(text: str) -> str:
-    value = (text or "").lower()
-    value = unicodedata.normalize("NFKD", value)
-    value = "".join(c for c in value if not unicodedata.combining(c))
-    value = value.replace("’", "'").replace("-", " ")
-    value = re.sub(r"[^a-z0-9' ]+", " ", value)
-    return " ".join(value.split())
+    return normalize_text(text)
 
 
 def detect_identity_intent(text: str) -> dict:
@@ -86,6 +80,7 @@ def detect_identity_intent(text: str) -> dict:
         "qui es t u",
         "tu es qui",
         "tu es quoi",
+        "quel est ton nom",
         "c'est qui neron",
         "c est qui neron",
         "presente toi",

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import unicodedata
 import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict
 
 from agents.builtin.base_agent import get_logger
+from core.pipeline.nlp.french_normalizer import normalize_text
 
 logger = get_logger(__name__)
 
@@ -70,16 +70,7 @@ class IntentResult:
 
 
 def _normalize(text: str) -> str:
-    n = unicodedata.normalize("NFD", text.lower().strip())
-    n = "".join(c for c in n if unicodedata.category(c) != "Mn")
-
-    for char in ["?", "!", ".", ",", ";", ":"]:
-        n = n.replace(char, " ")
-
-    n = n.replace("-", " ")
-    n = n.replace("'", " ").replace("’", " ").replace("`", " ")
-
-    return " ".join(n.split())
+    return normalize_text(text)
 
 
 def _fallback_intent(query: str) -> Intent | None:
@@ -511,7 +502,8 @@ class IntentRouter:
         self.llm_agent = llm_agent
 
     async def route(self, query: str) -> IntentResult:
-        nlp_result = _nlp().process(query)
+        normalized_query = _normalize(query)
+        nlp_result = _nlp().process(normalized_query)
 
         intent_str = nlp_result.intent
         intent = _INTENT_MAP.get(intent_str, Intent.CONVERSATION)
@@ -519,7 +511,7 @@ class IntentRouter:
         entities = nlp_result.entities
         score = nlp_result.confidence
 
-        fallback = _fallback_intent(query)
+        fallback = _fallback_intent(normalized_query)
 
         if fallback:
             intent = fallback
