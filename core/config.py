@@ -181,8 +181,9 @@ class Config:
     # Canonique: home_assistant. Fallback legacy: homeassistant.
     _ha_cfg = _cfg.get("home_assistant") or _cfg.get("homeassistant") or {}
     HA_ENABLED  = str(_ha_cfg.get("enabled") if _ha_cfg.get("enabled") is not None else os.getenv("HA_ENABLED", False)).lower() == "true"
+    _ha_token_env = _ha_cfg.get("token_env") or "HA_TOKEN"
     HA_URL      = _ha_cfg.get("url") or os.getenv("HA_URL") or "http://homeassistant.local:8123"
-    HA_TOKEN    = _ha_cfg.get("token") or os.getenv("HA_TOKEN") or ""
+    HA_TOKEN    = _ha_cfg.get("token") or os.getenv("HA_TOKEN") or os.getenv(str(_ha_token_env)) or ""
     HA_TIMEOUT  = float(_ha_cfg.get("timeout") or os.getenv("HA_TIMEOUT") or 10.0)
 
     # ── Code Agent ────────────────────────────────────────────────────────
