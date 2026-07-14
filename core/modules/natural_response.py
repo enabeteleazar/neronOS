@@ -100,7 +100,8 @@ async def try_natural_response(
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> str | None:
     try:
-        from llm.client.client import NéronLLMClient
+        from core.providers import provider_registry
+        from core.providers.models import ProviderRequest
     except Exception:
         return None
 
@@ -117,21 +118,30 @@ async def try_natural_response(
     )
 
     try:
-        client = NéronLLMClient()
-        if hasattr(client, "_timeout"):
-            client._timeout = min(float(client._timeout), timeout_seconds)
-        if hasattr(client, "_retries"):
-            client._retries = 0
+        provider = provider_registry.get("llm")
+        if provider is None:
+            return None
 
-        result = await asyncio.wait_for(
-            client.generate(
-                task_type="chat",
-                prompt=prompt,
-                context={},
-                request_id=f"{module_name}-natural-response",
+        response = await asyncio.wait_for(
+            provider.execute(
+                ProviderRequest(
+                    action="generate",
+                    payload={
+                        "task_type": "chat",
+                        "prompt": prompt,
+                        "context": {},
+                    },
+                    trace_id=f"{module_name}-natural-response",
+                )
             ),
             timeout=timeout_seconds + 0.5,
         )
+
+        class Result:
+            result = response.result.get("text", "") if isinstance(response.result, dict) else ""
+            model_used = response.result.get("model", "") if isinstance(response.result, dict) else ""
+
+        result = Result()
     except Exception:
         return None
 
