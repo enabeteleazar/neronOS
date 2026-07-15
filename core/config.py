@@ -86,6 +86,7 @@ class Config:
 
     # ── Serveur ───────────────────────────────────────────────────────────
     SERVER_HOST = _get(_cfg, "server", "host", fallback_env="SERVER_HOST",     default="0.0.0.0")
+    SELF_HOST = _get(_cfg, "service", "host", fallback_env="SELF_HOST", default="127.0.0.1")
     SERVER_PORT = int(_get(_cfg, "server", "port", fallback_env="NERON_CORE_HTTP", default=8010))
     CORS_ORIGINS = _get_list(
         _cfg,
