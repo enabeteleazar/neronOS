@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -7,7 +8,9 @@ import yaml
 
 from core.config.paths import NERON_CONFIG
 
-CONFIG_PATH = str(NERON_CONFIG)
+# Keep the configuration loader aligned with the central path resolver while
+# allowing the process environment to override the final value when needed.
+CONFIG_PATH = os.getenv("NERON_CONFIG", str(NERON_CONFIG))
 
 
 class ConfigLoader:

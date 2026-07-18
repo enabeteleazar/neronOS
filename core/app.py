@@ -6,8 +6,17 @@ from pathlib import Path
 
 _CORE_DIR = Path(__file__).resolve().parent
 _SERVER_DIR = _CORE_DIR.parent
+
+# Resolve imports from the server package root so `core` and `modules` map to
+# the expected server-side packages rather than the local core working tree.
+for entry in ("", str(_CORE_DIR)):
+    if entry in sys.path:
+        sys.path.remove(entry)
 if str(_SERVER_DIR) not in sys.path:
     sys.path.insert(0, str(_SERVER_DIR))
+
+# Remove any stale shadow entry so `modules.*` resolves to the server package.
+sys.modules.pop("modules", None)
 
 # When app.py is imported from server/core, the local core/logging package can
 # shadow the standard library module needed by FastAPI dependencies.
@@ -24,7 +33,7 @@ finally:
 # INIT LOGGING (PRIORITAIRE)
 # =========================
 
-from core.logging.setup import logger
+from core.neron_logging.setup import logger
 
 from core.modules.memory.router import router as memory_router
 
