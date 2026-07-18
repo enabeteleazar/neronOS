@@ -7,14 +7,14 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from common.paths import NERON_DATA_DIR
+from core.config.paths import NERON_DATA_DIR
 from core.api.auth import verify_api_key
+from core.agent_registry import get_external_agent_registry
 from goal.planning import AutonomousPlanner
 from goal.planning.executor import PlanExecutor
 from goal.planning.storage import PlanStorage
 from goal.system.task_manager import get_task_manager
 from goal.system.task_executor import get_task_executor
-from agents.builtin.communication.telegram_agent import send_notification
 from modules.cognitive.critic_engine import get_critic_engine
 from goal.goals.goal_orchestrator import get_goal_orchestrator
 from goal.goals.goal_manager import get_goal_manager
@@ -24,6 +24,11 @@ router = APIRouter(tags=["planner"], dependencies=[Depends(verify_api_key)])
 planner = AutonomousPlanner()
 storage = PlanStorage()
 executor = PlanExecutor()
+send_notification = get_external_agent_registry().function(
+    "agents.builtin.communication.telegram_agent",
+    "send_notification",
+    async_default=True,
+)
 
 
 

@@ -61,7 +61,7 @@ from pydantic import BaseModel, Field
 # IMPORTS NÉRON (APRÈS LOGGING)
 # =========================
 
-from agents.builtin.base_agent import get_logger
+from core.agent_registry import get_external_agent_registry, get_logger
 from core.api.auth import verify_api_key
 from core.infrastructure.auth import (
     AuthenticationError,
@@ -80,30 +80,6 @@ from core.infrastructure.topology import build_topology, get_topology_service
 from core.a2a import a2a_client
 from core.providers import ensure_default_providers, provider_registry
 
-# DEV
-from agents.builtin.dev.code_agent.agent import CodeAgent
-from agents.builtin.dev.code_audit_agent import CodeAuditAgent
-
-# AUTOMATION
-from agents.builtin.automation.ha_agent import HAAgent
-
-# CORE
-from agents.builtin.core.llm_agent import LLMAgent
-from agents.builtin.core.memory_agent import MemoryAgent
-
-# COMMUNICATION
-from agents.builtin.communication.telegram_agent import (
-    set_agents,
-    start_bot,
-    stop_bot
-)
-from agents.builtin.communication.web_agent import WebAgent
-
-# IO
-from agents.builtin.io.voice_proxy import STTAgentProxy as STTAgent
-from agents.builtin.io.voice_proxy import TTSAgentProxy as TTSAgent
-
-
 from core.config import settings
 from modules.capabilities.resolver import CapabilityResolver
 from core.identity import get_identity
@@ -112,11 +88,6 @@ from core.pipeline.routing.agent_router import (
     LLMConfig,
     RouterToolBindings,
 )
-from modules.events.event import Event
-from modules.events.event_bus import event_bus
-from modules.events.event_types import USER_MESSAGE_RECEIVED
-from modules.events.subscribers import register_default_subscribers
-register_default_subscribers()
 from core.gateway.gateway import GatewayConfig, NeronGateway
 from modules.scheduler.routes import router as scheduler_router
 from modules.scheduler.scheduler import get_task_scheduler
@@ -138,6 +109,27 @@ TOKEN = HA_CONFIG.get("token")
 SYNC_INTERVAL = HA_CONFIG.get("sync_interval", 60)
 
 from core.api.planner_routes import router as planner_router
+
+_external_agents = get_external_agent_registry()
+CodeAgent = _external_agents.agent_class("agents.builtin.dev.code_agent.agent", "CodeAgent")
+CodeAuditAgent = _external_agents.agent_class("agents.builtin.dev.code_audit_agent", "CodeAuditAgent")
+HAAgent = _external_agents.agent_class("agents.builtin.automation.ha_agent", "HAAgent")
+LLMAgent = _external_agents.agent_class("agents.builtin.core.llm_agent", "LLMAgent")
+MemoryAgent = _external_agents.agent_class("agents.builtin.core.memory_agent", "MemoryAgent")
+WebAgent = _external_agents.agent_class("agents.builtin.communication.web_agent", "WebAgent")
+STTAgent = _external_agents.agent_class("agents.builtin.io.voice_proxy", "STTAgentProxy")
+TTSAgent = _external_agents.agent_class("agents.builtin.io.voice_proxy", "TTSAgentProxy")
+set_agents = _external_agents.function("agents.builtin.communication.telegram_agent", "set_agents")
+start_bot = _external_agents.function(
+    "agents.builtin.communication.telegram_agent",
+    "start_bot",
+    async_default=True,
+)
+stop_bot = _external_agents.function(
+    "agents.builtin.communication.telegram_agent",
+    "stop_bot",
+    async_default=True,
+)
 
 # =========================
 # LOGGER LOCAL (OPTIONNEL PAR MODULE)
@@ -332,7 +324,6 @@ async def lifespan(app: FastAPI):
         _startup_time = time.monotonic()
         health_state.mark_started()
         logger.info(json.dumps({"event": "startup", "version": VERSION}))
-        register_default_subscribers()
         ensure_default_providers()
 
         try:
@@ -962,12 +953,10 @@ async def text_input(input_data: TextInput, _: None = Depends(verify_api_key)):
 
     metrics.record_request_start()
     logger.info(json.dumps({"event": "request_received", "query": query[:80]}))
-    await event_bus.publish(
-        Event(
-            type=USER_MESSAGE_RECEIVED,
-            payload={"text": query},
-            source=f"{input_data.source_channel}.input.text",
-        )
+    infrastructure_event_bus.publish(
+        event_type="user.message.received",
+        source=f"{input_data.source_channel}.input.text",
+        payload={"text": query},
     )
 
     started = time.monotonic()

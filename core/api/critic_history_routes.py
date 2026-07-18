@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from fastapi import APIRouter
-from common.paths import NERON_DATA_DIR
+from core.config.paths import NERON_DATA_DIR
 from modules.cognitive.history import read_jsonl_tail
 
 

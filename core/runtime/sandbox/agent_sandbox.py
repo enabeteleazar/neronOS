@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from common.paths import NERON_ROOT
+from core.config.paths import NERON_ROOT
 
 _RESULT_MARKER = "__NERON_AGENT_SANDBOX_RESULT__"
 _SYSTEMD_USER = "neron-agent"

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from llm.provider import LLMProvider
+from .llm import ExternalLLMProvider
 from .memory import ObliviaProvider
 from .registry import ProviderRegistry, provider_registry
 
@@ -19,7 +19,7 @@ def ensure_default_providers(
         logger.info("Provider registered: oblivia")
 
     if registry.get("llm") is None:
-        registry.register(LLMProvider())
+        registry.register(ExternalLLMProvider())
         logger.info("Provider registered: llm")
 
     if registry.get("homeassistant") is None:

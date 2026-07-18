@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict
 
-from agents.builtin.base_agent import get_logger
+from core.agent_registry import get_logger
 from core.pipeline.nlp.french_normalizer import normalize_text
 
 logger = get_logger(__name__)

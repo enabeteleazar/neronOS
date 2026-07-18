@@ -4,7 +4,7 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
-from common.paths import NERON_DATA_DIR
+from core.config.paths import NERON_DATA_DIR
 from modules.evolution.supervisor import (
     format_proposals_for_telegram,
     get_evolution_supervisor,

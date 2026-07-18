@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from agents.builtin.base_agent import get_logger
+from core.agent_registry import get_logger
 from core.a2a import A2AClient, AgentCard, AgentMessage, AgentTask, a2a_client
 from core.providers.models import ProviderRequest
 from core.providers.registry import ProviderRegistry, provider_registry

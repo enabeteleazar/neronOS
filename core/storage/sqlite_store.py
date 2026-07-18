@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator
 
-from common.paths import NERON_DATA_DIR
+from core.config.paths import NERON_DATA_DIR
 
 DEFAULT_DATABASE_PATH = Path(
     os.getenv("NERON_STATE_DB", str(NERON_DATA_DIR / "neron_state.sqlite3"))

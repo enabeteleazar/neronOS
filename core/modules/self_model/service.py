@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from common.paths import NERON_DATA_DIR
+from core.config.paths import NERON_DATA_DIR
 from core.identity import get_identity
 from core.modules.status.service import build_status_payload
 

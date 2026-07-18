@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from common.paths import NERON_CONFIG, NERON_ROOT
+from core.config.paths import NERON_CONFIG, NERON_ROOT
 from core.identity import build_identity_prompt, get_identity
 
 try:

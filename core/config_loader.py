@@ -5,7 +5,7 @@ from typing import Any
 
 import yaml
 
-from common.paths import NERON_CONFIG
+from core.config.paths import NERON_CONFIG
 
 CONFIG_PATH = str(NERON_CONFIG)
 

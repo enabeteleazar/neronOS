@@ -7,7 +7,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from agents.builtin.base_agent import get_logger
+from core.agent_registry import get_logger
 from modules.capabilities.models import CapabilityRequest
 from core.constants import NERON_HELP_TEXT
 from core.pipeline.intent.intent_router import Intent, IntentResult, IntentRouter

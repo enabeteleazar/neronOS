@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from common.paths import NERON_IDENTITY_PATH
+from core.config.paths import NERON_IDENTITY_PATH
 
 NERON_MD_PATH = NERON_IDENTITY_PATH
 MAX_CONTEXT_CHARS = 3600
