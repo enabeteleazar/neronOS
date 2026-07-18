@@ -49,7 +49,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 import psutil
 from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, Request, UploadFile
@@ -145,6 +145,21 @@ _EXTERNAL_ROUTER_SPECS = [
     ("projects", "goal.projects.routes", False),
     ("evolution", "modules.evolution.routes", False),
 ]
+
+_registered_router_ids: set[int] = set()
+
+
+def _include_router_once(app: FastAPI, router: APIRouter | None, **kwargs: object) -> None:
+    if router is None:
+        return
+
+    router_id = id(router)
+    if router_id in _registered_router_ids:
+        logger.warning("Router already registered, skipping duplicate include: %s", getattr(router, "tags", router))
+        return
+
+    _registered_router_ids.add(router_id)
+    app.include_router(router, **kwargs)
 
 
 def _load_router(module_name: str, *, required: bool = False) -> APIRouter | None:
@@ -362,6 +377,45 @@ metrics = Metrics()
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 
 
+async def _start_scheduler(task_scheduler: Any) -> None:
+    recovered_tasks = task_scheduler.recover_running_tasks()
+    if recovered_tasks:
+        logger.warning(
+            "Scheduler tasks interrupted after restart: %s",
+            ", ".join(task.task_id for task in recovered_tasks),
+        )
+
+    start_worker = getattr(task_scheduler, "start_worker", None)
+    if callable(start_worker):
+        await start_worker()
+        logger.info(
+            "TaskScheduler initialise worker_enabled=%s max_concurrent=%s",
+            getattr(task_scheduler, "worker_enabled", False),
+            getattr(task_scheduler, "max_concurrent_tasks", 0),
+        )
+        return
+
+    start = getattr(task_scheduler, "start", None)
+    if callable(start):
+        start()
+        return
+
+    logger.warning("TaskScheduler does not expose a supported start method")
+
+
+async def _stop_scheduler(task_scheduler: Any) -> None:
+    stop_worker = getattr(task_scheduler, "stop_worker", None)
+    if callable(stop_worker):
+        await stop_worker()
+        return
+
+    stop = getattr(task_scheduler, "stop", None)
+    if callable(stop):
+        stop()
+        return
+
+    logger.warning("TaskScheduler does not expose a supported stop method")
+
 
 async def _registry_stale_loop() -> None:
     timeout_seconds = float(os.getenv("NERON_REGISTRY_STALE_TIMEOUT_SECONDS", "90"))
@@ -416,18 +470,7 @@ async def lifespan(app: FastAPI):
             from modules.scheduler.scheduler import get_task_scheduler
 
             task_scheduler = get_task_scheduler()
-            recovered_tasks = task_scheduler.recover_running_tasks()
-            if recovered_tasks:
-                logger.warning(
-                    "Scheduler tasks interrupted after restart: %s",
-                    ", ".join(task.task_id for task in recovered_tasks),
-                )
-            await task_scheduler.start_worker()
-            logger.info(
-                "TaskScheduler initialise worker_enabled=%s max_concurrent=%s",
-                task_scheduler.worker_enabled,
-                task_scheduler.max_concurrent_tasks,
-            )
+            await _start_scheduler(task_scheduler)
         except Exception as exc:
             logger.warning("TaskScheduler init failed: %s", exc)
 
@@ -477,12 +520,6 @@ async def lifespan(app: FastAPI):
             logger.warning("Module personality non disponible — system prompt statique actif")
 
         logger.info(json.dumps({"event": "agents_ready"}))
-
-        logger.warning("scheduler_setup introuvable — setup scheduler ignoré")
-        try:
-            get_task_scheduler().start()
-        except Exception as e:
-            logger.warning("TaskScheduler start ignoré : %s", e)
 
         try:
             llm_cfg = LLMConfig(
@@ -584,7 +621,7 @@ async def lifespan(app: FastAPI):
         try:
             from modules.scheduler.scheduler import get_task_scheduler
 
-            await get_task_scheduler().stop_worker()
+            await _stop_scheduler(get_task_scheduler())
         except Exception as e:
             logger.warning("Erreur arrêt TaskScheduler : %s", e)
 
@@ -601,11 +638,6 @@ async def lifespan(app: FastAPI):
                 pass
             except Exception as e:
                 logger.warning("Erreur tâche SelfMonitor : %s", e)
-
-        try:
-            get_task_scheduler().stop()
-        except Exception as e:
-            logger.warning("Erreur arrêt scheduler : %s", e)
 
         if ha_agent:
             try:
@@ -677,7 +709,6 @@ for router, kwargs in [
     (globals().get("scheduler_router"), {}),
     (globals().get("agent_runtime_router"), {}),
     (globals().get("capabilities_router"), {}),
-    (globals().get("task_router"), {}),
     (globals().get("goal_task_router"), {"dependencies": _INTERNAL_AUTH}),
     (globals().get("cognitive_core_router"), {"dependencies": _INTERNAL_AUTH}),
     (globals().get("cognitive_report_router"), {"dependencies": _INTERNAL_AUTH}),
@@ -688,8 +719,7 @@ for router, kwargs in [
     (globals().get("evolution_router"), {}),
     (globals().get("memory_router"), {"dependencies": _INTERNAL_AUTH}),
 ]:
-    if router is not None:
-        app.include_router(router, **kwargs)
+    _include_router_once(app, router, **kwargs)
 
 app.add_middleware(
     CORSMiddleware,
@@ -1195,7 +1225,7 @@ async def voice_input(file: UploadFile = File(...)):
 
 # Planner autonome
 if globals().get("planner_router") is not None:
-    app.include_router(planner_router)
+    _include_router_once(app, planner_router)
 
 
 if __name__ == "__main__":
