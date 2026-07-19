@@ -91,17 +91,36 @@ class ObliviaProvider(ProviderProtocol):
         )
 
 
+    # Chaque action mémoire a son propre endpoint réel côté memory/app.py.
+    # AVANT ce fix : toute action postait vers /memory/query, qui n'existe
+    # pas — 404 systématique, jamais détecté faute de test de bout en bout
+    # via Core avant l'audit du 19 juillet 2026.
+    _ACTION_ROUTES: dict[str, tuple[str, str]] = {
+        "remember": ("POST", "/memory/remember"),
+        "update":   ("POST", "/memory/remember"),
+        "recall":   ("POST", "/memory/recall"),
+        "search":   ("POST", "/memory/recall"),
+        "forget":   ("POST", "/memory/forget"),
+        "status":   ("GET", "/status"),
+    }
+
     async def execute(
         self,
         request: ProviderRequest
     ) -> ProviderResponse:
 
+        method, path = self._ACTION_ROUTES.get(request.action, ("POST", "/memory/recall"))
+
         try:
             async with httpx.AsyncClient(timeout=10) as client:
-                response = await client.post(
-                    f"{self.base_url}/memory/query",
-                    json=request.model_dump()
-                )
+                if method == "GET":
+                    response = await client.get(f"{self.base_url}{path}")
+                else:
+                    response = await client.post(
+                        f"{self.base_url}{path}",
+                        json=request.payload,
+                    )
+            response.raise_for_status()
 
             self._status = "healthy"
 
