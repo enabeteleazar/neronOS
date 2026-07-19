@@ -11,12 +11,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from common.paths import NERON_WORKSPACE_DIR
+from core.agent_registry import get_external_agent_registry
+from core.config.paths import NERON_WORKSPACE_DIR
 from core.pipeline.intent.intent_router import Intent, IntentResult
 
 logger = logging.getLogger("pipeline.agent_router")
 
 WORKSPACE_AGENTS_DIR = NERON_WORKSPACE_DIR / "agents"
+_external_agents = get_external_agent_registry()
 
 _llm: Optional[object] = None
 _memory: Optional[object] = None
@@ -93,7 +95,7 @@ def _result_to_text(result: Any) -> str:
 def _get_llm():
     global _llm
     if _llm is None:
-        from agents.builtin.core.llm_agent import LLMAgent
+        LLMAgent = _external_agents.agent_class("agents.builtin.core.llm_agent", "LLMAgent")
         _llm = LLMAgent()
     return _llm
 
@@ -101,7 +103,7 @@ def _get_llm():
 def _get_memory():
     global _memory
     if _memory is None:
-        from agents.builtin.core.memory_agent import MemoryAgent
+        MemoryAgent = _external_agents.agent_class("agents.builtin.core.memory_agent", "MemoryAgent")
         _memory = MemoryAgent()
     return _memory
 
@@ -109,7 +111,7 @@ def _get_memory():
 def _get_system():
     global _system
     if _system is None:
-        from agents.builtin.core.system_agent import SystemAgent
+        SystemAgent = _external_agents.agent_class("agents.builtin.core.system_agent", "SystemAgent")
         _system = SystemAgent()
     return _system
 
@@ -117,7 +119,7 @@ def _get_system():
 def _get_ha():
     global _ha
     if _ha is None:
-        from agents.builtin.automation.ha_agent import HAAgent
+        HAAgent = _external_agents.agent_class("agents.builtin.automation.ha_agent", "HAAgent")
         _ha = HAAgent()
     return _ha
 
@@ -125,7 +127,7 @@ def _get_ha():
 def _get_web():
     global _web
     if _web is None:
-        from agents.builtin.communication.web_agent import WebAgent
+        WebAgent = _external_agents.agent_class("agents.builtin.communication.web_agent", "WebAgent")
         _web = WebAgent()
     return _web
 
@@ -133,7 +135,7 @@ def _get_web():
 def _get_news():
     global _news
     if _news is None:
-        from agents.builtin.io.news_agent import NewsAgent
+        NewsAgent = _external_agents.agent_class("agents.builtin.io.news_agent", "NewsAgent")
         _news = NewsAgent()
     return _news
 
@@ -141,7 +143,7 @@ def _get_news():
 def _get_weather():
     global _weather
     if _weather is None:
-        from agents.builtin.io.weather_agent import WeatherAgent
+        WeatherAgent = _external_agents.agent_class("agents.builtin.io.weather_agent", "WeatherAgent")
         _weather = WeatherAgent()
     return _weather
 
@@ -149,7 +151,7 @@ def _get_weather():
 def _get_todo():
     global _todo
     if _todo is None:
-        from agents.builtin.core.todo_agent import TodoAgent
+        TodoAgent = _external_agents.agent_class("agents.builtin.core.todo_agent", "TodoAgent")
         _todo = TodoAgent()
     return _todo
 
@@ -157,7 +159,7 @@ def _get_todo():
 def _get_wiki():
     global _wiki
     if _wiki is None:
-        from agents.builtin.io.wiki_agent import WikiAgent
+        WikiAgent = _external_agents.agent_class("agents.builtin.io.wiki_agent", "WikiAgent")
         _wiki = WikiAgent()
     return _wiki
 
@@ -711,7 +713,10 @@ class AgentRouter:
             return _result_to_text(result)
 
         if intent in (Intent.CODE, Intent.CODE_AUDIT):
-            from agents.builtin.dev.code_audit_agent import CodeAuditAgent
+            CodeAuditAgent = _external_agents.agent_class(
+                "agents.builtin.dev.code_audit_agent",
+                "CodeAuditAgent",
+            )
             agent = CodeAuditAgent()
             result = await agent.execute(query)
             return _result_to_text(result)

@@ -7,7 +7,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from agents.builtin.base_agent import get_logger
+from core.agent_registry import get_logger
 from modules.capabilities.models import CapabilityRequest
 from core.constants import NERON_HELP_TEXT
 from core.pipeline.intent.intent_router import Intent, IntentResult, IntentRouter
@@ -1004,7 +1004,7 @@ class CoreOrchestrator:
             )
         )
         result = provider_response.result if isinstance(provider_response.result, dict) else {}
-        model = str(result.get("model") or "")
+        model = str(result.get("model_used") or "")
         metadata.update(
             {
                 "executor": provider.name,
@@ -1024,7 +1024,7 @@ class CoreOrchestrator:
                 {**metadata, "error": provider_response.error},
             )
 
-        return str(result.get("text") or ""), provider.name, metadata
+        return str(result.get("result") or ""), provider.name, metadata
 
 
     async def _execute_registry(

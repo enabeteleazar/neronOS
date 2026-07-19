@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from common.paths import NERON_IDENTITY_PATH
+from core.config.paths import NERON_IDENTITY_PATH
 
 NERON_MD_PATH = NERON_IDENTITY_PATH
 MAX_CONTEXT_CHARS = 3600
@@ -389,26 +389,36 @@ async def _try_llm_reformulation(
         return None
 
     try:
-        from llm.client.client import NéronLLMClient
+        from core.providers import provider_registry
+        from core.providers.models import ProviderRequest
     except Exception:
         return None
 
     try:
-        client = NéronLLMClient()
-        if hasattr(client, "_timeout"):
-            client._timeout = min(float(client._timeout), LLM_TIMEOUT_SECONDS)
-        if hasattr(client, "_retries"):
-            client._retries = 0
+        provider = provider_registry.get("llm")
+        if provider is None:
+            return None
 
-        result = await asyncio.wait_for(
-            client.generate(
-                task_type="chat",
-                prompt=_build_reformulation_prompt(question, identity_context, kind),
-                context={},
-                request_id="identity-reformulation",
+        response = await asyncio.wait_for(
+            provider.execute(
+                ProviderRequest(
+                    action="generate",
+                    payload={
+                        "task_type": "chat",
+                        "prompt": _build_reformulation_prompt(question, identity_context, kind),
+                        "context": {},
+                    },
+                    trace_id="identity-reformulation",
+                )
             ),
             timeout=LLM_TIMEOUT_SECONDS + 0.5,
         )
+
+        class Result:
+            result = response.result.get("text", "") if isinstance(response.result, dict) else ""
+            model_used = response.result.get("model", "") if isinstance(response.result, dict) else ""
+
+        result = Result()
     except Exception:
         return None
 

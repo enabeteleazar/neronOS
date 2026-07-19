@@ -12,7 +12,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from common.paths import NERON_DATA_DIR, NERON_ROOT, NERON_WORKSPACE_DIR
+from core.config.paths import NERON_DATA_DIR, NERON_ROOT, NERON_WORKSPACE_DIR
 from .models import GoalAnalysis
 from core.providers.models import ProviderRequest
 from core.providers.registry import ProviderRegistry

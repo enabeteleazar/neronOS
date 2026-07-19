@@ -8,8 +8,17 @@ import os
 from pathlib import Path
 from typing import Any
 
-from common.paths import NERON_CONFIG, NERON_ROOT
+# Preserve `from core.config import settings` while allowing
+# `from core.config.paths import ...` despite this legacy module file.
+__path__ = [str(Path(__file__).with_name("config"))]
+
+from core.config.paths import NERON_CONFIG, NERON_ROOT
 from core.identity import build_identity_prompt, get_identity
+
+# Keep the runtime config aligned with the canonical path resolver. The
+# environment-provided values take precedence, then the project-tree fallback.
+NERON_CONFIG_PATH = NERON_CONFIG
+NERON_RUNTIME_ROOT = NERON_ROOT
 
 try:
     import yaml
@@ -18,8 +27,8 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-NERON_DIR = Path(os.getenv("NERON_DIR", str(NERON_ROOT))).expanduser()
-YAML_PATH = NERON_CONFIG
+NERON_DIR = Path(os.getenv("NERON_DIR", str(NERON_RUNTIME_ROOT))).expanduser()
+YAML_PATH = NERON_CONFIG_PATH
 
 # Niveaux de log valides — utilisé pour valider LOG_LEVEL
 _VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
@@ -86,6 +95,7 @@ class Config:
 
     # ── Serveur ───────────────────────────────────────────────────────────
     SERVER_HOST = _get(_cfg, "server", "host", fallback_env="SERVER_HOST",     default="0.0.0.0")
+    SELF_HOST = _get(_cfg, "service", "host", fallback_env="SELF_HOST", default="127.0.0.1")
     SERVER_PORT = int(_get(_cfg, "server", "port", fallback_env="NERON_CORE_HTTP", default=8010))
     CORS_ORIGINS = _get_list(
         _cfg,

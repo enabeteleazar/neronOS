@@ -1,31 +1,39 @@
 from __future__ import annotations
 
-from core.api.self_model_context_routes import router as self_model_router
-from core.api.selfmodel_routes import router as selfmodel_router
-from core.api.runtime_governor_routes import router as runtime_governor_router
-from core.api.world_model_routes import router as world_model_router
-from goal.goals.routes import router as goals_router
-from tools.routes import router as tools_router
-from modules.scheduler.routes import router as scheduler_router
-from agents.runtime.routes import router as agent_runtime_router
-from modules.capabilities.routes import router as capabilities_router
-from core.api.task_routes import router as task_router
-from core.api.goal_task_routes import router as goal_task_router
-from core.api.cognitive_core_routes import router as cognitive_core_router
-from core.api.cognitive_report_routes import router as cognitive_report_router
-from core.api.action_history_routes import router as action_history_router
-from core.api.critic_history_routes import router as critic_history_router
-from modules.code_awareness.routes import router as code_awareness_router
-from goal.projects.routes import router as projects_router
-from modules.evolution.routes import router as evolution_router
+import importlib
+import sys
+from pathlib import Path
 
+_CORE_DIR = Path(__file__).resolve().parent
+_SERVER_DIR = _CORE_DIR.parent
 
+# Resolve imports from the server package root so `core` and `modules` map to
+# the expected server-side packages rather than the local core working tree.
+for entry in ("", str(_CORE_DIR)):
+    if entry in sys.path:
+        sys.path.remove(entry)
+if str(_SERVER_DIR) not in sys.path:
+    sys.path.insert(0, str(_SERVER_DIR))
+
+# Remove any stale shadow entry so `modules.*` resolves to the server package.
+sys.modules.pop("modules", None)
+
+# When app.py is imported from server/core, the local core/logging package can
+# shadow the standard library module needed by FastAPI dependencies.
+_cwd_entries = {"", str(_CORE_DIR)}
+_saved_sys_path = list(sys.path)
+try:
+    sys.path = [entry for entry in sys.path if entry not in _cwd_entries]
+    sys.modules.pop("logging", None)
+    importlib.import_module("logging")
+finally:
+    sys.path = _saved_sys_path
 
 # =========================
 # INIT LOGGING (PRIORITAIRE)
 # =========================
 
-from core.logging.setup import logger
+from core.neron_logging.setup import logger
 
 from core.modules.memory.router import router as memory_router
 
@@ -41,10 +49,10 @@ import os
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 import psutil
-from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from prometheus_client import (
@@ -61,7 +69,7 @@ from pydantic import BaseModel, Field
 # IMPORTS NÉRON (APRÈS LOGGING)
 # =========================
 
-from agents.builtin.base_agent import get_logger
+from core.agent_registry import get_external_agent_registry, get_logger
 from core.api.auth import verify_api_key
 from core.infrastructure.auth import (
     AuthenticationError,
@@ -80,56 +88,29 @@ from core.infrastructure.topology import build_topology, get_topology_service
 from core.a2a import a2a_client
 from core.providers import ensure_default_providers, provider_registry
 
-# DEV
-from agents.builtin.dev.code_agent.agent import CodeAgent
-from agents.builtin.dev.code_audit_agent import CodeAuditAgent
-
-# AUTOMATION
-from agents.builtin.automation.ha_agent import HAAgent
-
-# CORE
-from agents.builtin.core.llm_agent import LLMAgent
-from agents.builtin.core.memory_agent import MemoryAgent
-
-# COMMUNICATION
-from agents.builtin.communication.telegram_agent import (
-    set_agents,
-    start_bot,
-    stop_bot
-)
-from agents.builtin.communication.web_agent import WebAgent
-
-# IO
-from agents.builtin.io.voice_proxy import STTAgentProxy as STTAgent
-from agents.builtin.io.voice_proxy import TTSAgentProxy as TTSAgent
-
-
 from core.config import settings
-from modules.capabilities.resolver import CapabilityResolver
 from core.identity import get_identity
 from core.pipeline.routing.agent_router import (
     AgentRouter,
     LLMConfig,
     RouterToolBindings,
 )
-from modules.events.event import Event
-from modules.events.event_bus import event_bus
-from modules.events.event_types import USER_MESSAGE_RECEIVED
-from modules.events.subscribers import register_default_subscribers
-register_default_subscribers()
 from core.gateway.gateway import GatewayConfig, NeronGateway
-from modules.scheduler.routes import router as scheduler_router
-from modules.scheduler.scheduler import get_task_scheduler
-# scheduler_stop handled via get_task_scheduler().stop
-from modules.sessions import SessionStore
-from modules.skills import SkillRegistry
+from core.runtime_compat import (
+    CapabilityResolver,
+    SessionStore,
+    SkillRegistry,
+    get_self_monitor,
+    get_task_scheduler,
+    include_optional_router,
+    optional_router,
+)
 from core.pipeline.intent.intent_router import IntentRouter
 from core.pipeline.orchestrator import (
     CoreOrchestrator,
     get_core_orchestrator,
     set_core_orchestrator,
 )
-from modules.self_model.monitor import get_self_monitor
 
 from core.config_loader import config
 HA_CONFIG = config.get("home_assistant", config.get("homeassistant", {}))
@@ -137,7 +118,105 @@ BASE_URL = HA_CONFIG.get("url")
 TOKEN = HA_CONFIG.get("token")
 SYNC_INTERVAL = HA_CONFIG.get("sync_interval", 60)
 
-from core.api.planner_routes import router as planner_router
+_CORE_ROUTER_SPECS = [
+    ("selfmodel", "core.api.selfmodel_routes", True),
+    ("self_model", "core.api.self_model_routes", True),
+    ("memory", "core.modules.memory.router", True),
+]
+_OPTIONAL_ROUTER_SPECS = [
+    ("self_model_context", "core.api.self_model_context_routes", True),
+    ("runtime_governor", "core.api.runtime_governor_routes", True),
+    ("world_model", "core.api.world_model_routes", True),
+    ("task", "core.api.task_routes", False),
+    ("goal_task", "core.api.goal_task_routes", True),
+    ("cognitive_core", "core.api.cognitive_core_routes", True),
+    ("cognitive_report", "core.api.cognitive_report_routes", True),
+    ("action_history", "core.api.action_history_routes", True),
+    ("critic_history", "core.api.critic_history_routes", True),
+    ("planner", "core.api.planner_routes", False),
+]
+_EXTERNAL_ROUTER_SPECS = [
+    ("goals", "goal.goals.routes", True),
+    ("tools", "tools.routes", False),
+    ("scheduler", "modules.scheduler.routes", False),
+    ("agent_runtime", "agents.runtime.routes", False),
+    ("capabilities", "modules.capabilities.routes", False),
+    ("code_awareness", "modules.code_awareness.routes", True),
+    ("projects", "goal.projects.routes", False),
+    ("evolution", "modules.evolution.routes", False),
+]
+
+_registered_router_ids: set[int] = set()
+
+
+def _include_router_once(app: FastAPI, router: APIRouter | None, **kwargs: object) -> None:
+    if router is None:
+        return
+
+    router_id = id(router)
+    if router_id in _registered_router_ids:
+        logger.warning("Router already registered, skipping duplicate include: %s", getattr(router, "tags", router))
+        return
+
+    _registered_router_ids.add(router_id)
+    app.include_router(router, **kwargs)
+
+
+def _load_router(module_name: str, *, required: bool = False) -> APIRouter | None:
+    try:
+        module = importlib.import_module(module_name)
+    except Exception as exc:  # pragma: no cover - defensive runtime isolation
+        if required:
+            logger.warning("Router import failed for %s: %s", module_name, exc)
+        return None
+
+    router = getattr(module, "router", None)
+    if not isinstance(router, APIRouter):
+        if required:
+            logger.warning("Router module %s does not expose an APIRouter", module_name)
+        return None
+    return router
+
+
+def _register_core_routers() -> None:
+    for suffix, module_name, required in _CORE_ROUTER_SPECS:
+        router = _load_router(module_name, required=required)
+        if router is not None:
+            globals()[f"{suffix}_router"] = router
+
+    for suffix, module_name, required in _OPTIONAL_ROUTER_SPECS:
+        router = _load_router(module_name, required=required)
+        if router is not None:
+            globals()[f"{suffix}_router"] = router
+
+    for suffix, module_name, required in _EXTERNAL_ROUTER_SPECS:
+        router = _load_router(module_name, required=required)
+        if router is not None:
+            globals()[f"{suffix}_router"] = router
+
+
+_register_core_routers()
+
+_external_agents = get_external_agent_registry()
+CodeAgent = _external_agents.agent_class("agents.builtin.dev.code_agent.agent", "CodeAgent")
+CodeAuditAgent = _external_agents.agent_class("agents.builtin.dev.code_audit_agent", "CodeAuditAgent")
+HAAgent = _external_agents.agent_class("agents.builtin.automation.ha_agent", "HAAgent")
+LLMAgent = _external_agents.agent_class("agents.builtin.core.llm_agent", "LLMAgent")
+MemoryAgent = _external_agents.agent_class("agents.builtin.core.memory_agent", "MemoryAgent")
+WebAgent = _external_agents.agent_class("agents.builtin.communication.web_agent", "WebAgent")
+STTAgent = _external_agents.agent_class("agents.builtin.io.voice_proxy", "STTAgentProxy")
+TTSAgent = _external_agents.agent_class("agents.builtin.io.voice_proxy", "TTSAgentProxy")
+set_agents = _external_agents.function("agents.builtin.communication.telegram_agent", "set_agents")
+start_bot = _external_agents.function(
+    "agents.builtin.communication.telegram_agent",
+    "start_bot",
+    async_default=True,
+)
+stop_bot = _external_agents.function(
+    "agents.builtin.communication.telegram_agent",
+    "stop_bot",
+    async_default=True,
+)
 
 # =========================
 # LOGGER LOCAL (OPTIONNEL PAR MODULE)
@@ -298,6 +377,45 @@ metrics = Metrics()
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 
 
+async def _start_scheduler(task_scheduler: Any) -> None:
+    recovered_tasks = task_scheduler.recover_running_tasks()
+    if recovered_tasks:
+        logger.warning(
+            "Scheduler tasks interrupted after restart: %s",
+            ", ".join(task.task_id for task in recovered_tasks),
+        )
+
+    start_worker = getattr(task_scheduler, "start_worker", None)
+    if callable(start_worker):
+        await start_worker()
+        logger.info(
+            "TaskScheduler initialise worker_enabled=%s max_concurrent=%s",
+            getattr(task_scheduler, "worker_enabled", False),
+            getattr(task_scheduler, "max_concurrent_tasks", 0),
+        )
+        return
+
+    start = getattr(task_scheduler, "start", None)
+    if callable(start):
+        start()
+        return
+
+    logger.warning("TaskScheduler does not expose a supported start method")
+
+
+async def _stop_scheduler(task_scheduler: Any) -> None:
+    stop_worker = getattr(task_scheduler, "stop_worker", None)
+    if callable(stop_worker):
+        await stop_worker()
+        return
+
+    stop = getattr(task_scheduler, "stop", None)
+    if callable(stop):
+        stop()
+        return
+
+    logger.warning("TaskScheduler does not expose a supported stop method")
+
 
 async def _registry_stale_loop() -> None:
     timeout_seconds = float(os.getenv("NERON_REGISTRY_STALE_TIMEOUT_SECONDS", "90"))
@@ -332,7 +450,6 @@ async def lifespan(app: FastAPI):
         _startup_time = time.monotonic()
         health_state.mark_started()
         logger.info(json.dumps({"event": "startup", "version": VERSION}))
-        register_default_subscribers()
         ensure_default_providers()
 
         try:
@@ -353,18 +470,7 @@ async def lifespan(app: FastAPI):
             from modules.scheduler.scheduler import get_task_scheduler
 
             task_scheduler = get_task_scheduler()
-            recovered_tasks = task_scheduler.recover_running_tasks()
-            if recovered_tasks:
-                logger.warning(
-                    "Scheduler tasks interrupted after restart: %s",
-                    ", ".join(task.task_id for task in recovered_tasks),
-                )
-            await task_scheduler.start_worker()
-            logger.info(
-                "TaskScheduler initialise worker_enabled=%s max_concurrent=%s",
-                task_scheduler.worker_enabled,
-                task_scheduler.max_concurrent_tasks,
-            )
+            await _start_scheduler(task_scheduler)
         except Exception as exc:
             logger.warning("TaskScheduler init failed: %s", exc)
 
@@ -414,12 +520,6 @@ async def lifespan(app: FastAPI):
             logger.warning("Module personality non disponible — system prompt statique actif")
 
         logger.info(json.dumps({"event": "agents_ready"}))
-
-        logger.warning("scheduler_setup introuvable — setup scheduler ignoré")
-        try:
-            get_task_scheduler().start()
-        except Exception as e:
-            logger.warning("TaskScheduler start ignoré : %s", e)
 
         try:
             llm_cfg = LLMConfig(
@@ -521,7 +621,7 @@ async def lifespan(app: FastAPI):
         try:
             from modules.scheduler.scheduler import get_task_scheduler
 
-            await get_task_scheduler().stop_worker()
+            await _stop_scheduler(get_task_scheduler())
         except Exception as e:
             logger.warning("Erreur arrêt TaskScheduler : %s", e)
 
@@ -538,11 +638,6 @@ async def lifespan(app: FastAPI):
                 pass
             except Exception as e:
                 logger.warning("Erreur tâche SelfMonitor : %s", e)
-
-        try:
-            get_task_scheduler().stop()
-        except Exception as e:
-            logger.warning("Erreur arrêt scheduler : %s", e)
 
         if ha_agent:
             try:
@@ -604,25 +699,27 @@ async def enforce_api_key(request: Request, call_next):
 
 _INTERNAL_AUTH = [Depends(verify_api_key)]
 
-app.include_router(self_model_router, dependencies=_INTERNAL_AUTH)
-app.include_router(selfmodel_router, dependencies=_INTERNAL_AUTH)
-app.include_router(runtime_governor_router, dependencies=_INTERNAL_AUTH)
-app.include_router(world_model_router, dependencies=_INTERNAL_AUTH)
-app.include_router(goals_router, dependencies=_INTERNAL_AUTH)
-app.include_router(tools_router)
-app.include_router(scheduler_router)
-app.include_router(agent_runtime_router)
-app.include_router(capabilities_router)
-app.include_router(task_router)
-app.include_router(goal_task_router, dependencies=_INTERNAL_AUTH)
-app.include_router(cognitive_core_router, dependencies=_INTERNAL_AUTH)
-app.include_router(cognitive_report_router, dependencies=_INTERNAL_AUTH)
-app.include_router(action_history_router, dependencies=_INTERNAL_AUTH)
-app.include_router(critic_history_router, dependencies=_INTERNAL_AUTH)
-app.include_router(code_awareness_router, dependencies=_INTERNAL_AUTH)
-app.include_router(projects_router)
-app.include_router(evolution_router)
-app.include_router(memory_router, dependencies=_INTERNAL_AUTH)
+for router, kwargs in [
+    (globals().get("self_model_router"), {"dependencies": _INTERNAL_AUTH}),
+    (globals().get("selfmodel_router"), {"dependencies": _INTERNAL_AUTH}),
+    (globals().get("runtime_governor_router"), {"dependencies": _INTERNAL_AUTH}),
+    (globals().get("world_model_router"), {"dependencies": _INTERNAL_AUTH}),
+    (globals().get("goals_router"), {"dependencies": _INTERNAL_AUTH}),
+    (globals().get("tools_router"), {}),
+    (globals().get("scheduler_router"), {}),
+    (globals().get("agent_runtime_router"), {}),
+    (globals().get("capabilities_router"), {}),
+    (globals().get("goal_task_router"), {"dependencies": _INTERNAL_AUTH}),
+    (globals().get("cognitive_core_router"), {"dependencies": _INTERNAL_AUTH}),
+    (globals().get("cognitive_report_router"), {"dependencies": _INTERNAL_AUTH}),
+    (globals().get("action_history_router"), {"dependencies": _INTERNAL_AUTH}),
+    (globals().get("critic_history_router"), {"dependencies": _INTERNAL_AUTH}),
+    (globals().get("code_awareness_router"), {"dependencies": _INTERNAL_AUTH}),
+    (globals().get("projects_router"), {}),
+    (globals().get("evolution_router"), {}),
+    (globals().get("memory_router"), {"dependencies": _INTERNAL_AUTH}),
+]:
+    _include_router_once(app, router, **kwargs)
 
 app.add_middleware(
     CORSMiddleware,
@@ -962,12 +1059,10 @@ async def text_input(input_data: TextInput, _: None = Depends(verify_api_key)):
 
     metrics.record_request_start()
     logger.info(json.dumps({"event": "request_received", "query": query[:80]}))
-    await event_bus.publish(
-        Event(
-            type=USER_MESSAGE_RECEIVED,
-            payload={"text": query},
-            source=f"{input_data.source_channel}.input.text",
-        )
+    infrastructure_event_bus.publish(
+        event_type="user.message.received",
+        source=f"{input_data.source_channel}.input.text",
+        payload={"text": query},
     )
 
     started = time.monotonic()
@@ -1129,7 +1224,8 @@ async def voice_input(file: UploadFile = File(...)):
 
 
 # Planner autonome
-app.include_router(planner_router)
+if globals().get("planner_router") is not None:
+    _include_router_once(app, planner_router)
 
 
 if __name__ == "__main__":
