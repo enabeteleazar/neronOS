@@ -1515,23 +1515,59 @@ def _extract_memory_recall_query(query: str) -> str:
         return normalized
     if re.fullmatch(r"qui est [a-z][a-z0-9 ]*", normalized):
         return normalized
-    return ""
+    # Repli : toute question personnelle non couverte par la liste figée
+    # ci-dessus (ex. "quelle est ma couleur préférée ?", jamais listée)
+    # ne doit jamais renvoyer une chaîne vide — RecallRequest.query exige
+    # min_length=1 côté memory/app.py, une chaîne vide provoque un 422
+    # systématique. SemanticQueryEngine fait déjà du matching par
+    # sous-chaîne (ex. "couleur preferee" in q) : lui passer la question
+    # normalisée complète fonctionne aussi bien que l'extraction ciblée,
+    # sans jamais risquer l'échec. Bug trouvé le 19 juillet 2026 : cette
+    # fonction retournait "" pour toute question hors de la liste figée.
+    return normalized
+
+
+_REMEMBER_PREFIXES = (
+    "memorise que",
+    "retiens que",
+    "souviens toi que",
+    "note que",
+    "garde en memoire que",
+)
+
+# Mots qui indiquent une intention de mémorisation même hors des tournures
+# exactes ci-dessus (ex. "Mémorise cette information : X", jamais couvert
+# par _REMEMBER_PREFIXES). Utilisé uniquement pour le repli générique
+# ci-dessous, pas pour la détection d'intention (cf. detector.py).
+_REMEMBER_TRIGGER_WORDS = ("memorise", "retiens", "souviens", "note", "garde")
 
 
 def _extract_memory_remember_content(query: str) -> str:
     normalized = query.strip()
     cleaned = _normalize(query)
-    prefixes = (
-        "memorise que",
-        "retiens que",
-        "souviens toi que",
-        "note que",
-        "garde en memoire que",
-    )
-    for prefix in prefixes:
+    for prefix in _REMEMBER_PREFIXES:
         if cleaned.startswith(prefix):
             words = normalized.split()
             return " ".join(words[len(prefix.split()) :]).strip(" .")
+
+    # Repli générique : "<déclencheur> ... : <contenu>". Couvre les
+    # tournures non explicitement listées ci-dessus (ex. "Mémorise cette
+    # information : ma couleur préférée est le bleu.") tant que la phrase
+    # commence par un mot déclencheur ET qu'un ':' sépare clairement
+    # l'intitulé du contenu. Bug trouvé le 19 juillet 2026 : sans ce repli,
+    # la phrase entière (déclencheur inclus) était stockée telle quelle.
+    #
+    # Limite connue, acceptée : si le contenu à mémoriser contient
+    # lui-même un ':' (ex. "Retiens ceci : le ratio est 3:1"), seul le
+    # texte avant le premier ':' est retiré comme intitulé — le contenu
+    # après le second ':' serait perdu. Cas rare, non traité ici.
+    first_word = cleaned.split(" ", 1)[0] if cleaned else ""
+    if first_word in _REMEMBER_TRIGGER_WORDS and ":" in normalized:
+        _, _, remainder = normalized.partition(":")
+        remainder = remainder.strip(" .")
+        if remainder:
+            return remainder
+
     return normalized
 
 

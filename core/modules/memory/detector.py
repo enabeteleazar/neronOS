@@ -1,9 +1,31 @@
 import re
-from core.pipeline.nlp.french_normalizer import normalize_text
+from core.pipeline.nlp.french_normalizer import _split_clitics, normalize_text
 
 
 def normalize(text: str) -> str:
     return normalize_text(text)
+
+
+def _pat(text: str) -> str:
+    """Les patterns ci-dessous sont écrits avec de vraies apostrophes pour
+    rester lisibles (français naturel) — mais le texte réellement comparé
+    à l'exécution (post normalize_text) n'en contient JAMAIS pour les
+    clitiques standards : normalize_text éclate "j'habite" en "j habite"
+    avant que ces patterns ne soient testés.
+
+    Bug découvert le 19 juillet 2026 (usage réel via Telegram) : TOUT
+    pattern contenant une apostrophe ne matchait jamais, silencieusement,
+    depuis toujours — "J'habite à Saron-sur-Aube" partait dans le LLM
+    général au lieu d'être mémorisé. Seuls les patterns sans apostrophe
+    (ex. "je travaille chez") fonctionnaient.
+
+    On applique ici la MÊME transformation que normalize_text (pas un
+    simple .replace("'", " ")) : certaines apostrophes survivent
+    normalize_text quand il n'y a pas de frontière de mot avant le
+    clitique — ex. "quelqu'un" reste "quelqu'un" (le "qu'" n'est pas en
+    début de mot). Un remplacement naïf casserait ce cas précis.
+    """
+    return _split_clitics(text)
 
 
 def detect_memory_intent(text: str) -> dict:
@@ -12,7 +34,7 @@ def detect_memory_intent(text: str) -> dict:
     # Explicit first-person facts are memories even when the user does not use
     # an imperative such as "mémorise".  Core only classifies the statement;
     # Oblivia remains responsible for understanding and storing its meaning.
-    personal_fact_patterns = (
+    personal_fact_patterns = tuple(_pat(p) for p in (
         r"^je suis\s+\S",
         r"^je m'appelle\s+\S",
         r"^ma femme s'appelle\s+\S",
@@ -45,17 +67,17 @@ def detect_memory_intent(text: str) -> dict:
         r"^(?:mon|ma|mes)\s+.+\s+s'appelle\s+\S",
         r"^(?!comment\s).+\s+s'appelle\s+\S",
         r"^j'ai remplace\s+.+\s+par\s+\S",
-    )
+    ))
 
-    remember_patterns = [
+    remember_patterns = [_pat(p) for p in [
         "retiens que",
         "memorise que",
         "souviens toi que",
         "note que",
         "garde en memoire que",
-    ]
+    ]]
 
-    recall_patterns = [
+    recall_patterns = [_pat(p) for p in [
         "que viens tu de memoriser",
         "qu as tu memorise",
         "que sais tu",
@@ -134,13 +156,13 @@ def detect_memory_intent(text: str) -> dict:
         "quels appareils je possede",
         "qu'est ce que j'ai achete",
         "tu te souviens de mon telephone",
-    ]
+    ]]
 
-    forget_patterns = [
+    forget_patterns = [_pat(p) for p in [
         "oublie que",
         "oublie ce que",
         "efface de ta memoire",
-    ]
+    ]]
 
     if any(p in value for p in remember_patterns) or any(
         re.match(pattern, value) for pattern in personal_fact_patterns
@@ -153,13 +175,13 @@ def detect_memory_intent(text: str) -> dict:
     if any(p in value for p in recall_patterns):
         return {"matched": True, "kind": "recall", "confidence": 0.9}
 
-    personal_recall_patterns = (
+    personal_recall_patterns = tuple(_pat(p) for p in (
         r"^quel(?:le)? est (?:mon|ma|mes)\s+.+$",
         r"^de quelle couleur est (?:mon|ma|mes)\s+.+$",
         r"^ou est (?:mon|ma|mes)\s+.+$",
         r"^comment s'appelle (?:mon|ma|mes)\s+.+$",
         r"^quel(?:le)? (?:systeme|solution|appareil).+j'utilise$",
-    )
+    ))
     if any(re.match(pattern, value) for pattern in personal_recall_patterns):
         return {"matched": True, "kind": "recall", "confidence": 0.95}
 
