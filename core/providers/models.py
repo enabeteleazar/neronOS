@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 ProviderType = Literal[
     "memory",
+    "knowledge",
     "llm",
     "homeassistant",
     "git",

@@ -122,6 +122,7 @@ _CORE_ROUTER_SPECS = [
     ("selfmodel", "core.api.selfmodel_routes", True),
     ("self_model", "core.api.self_model_routes", True),
     ("memory", "core.modules.memory.router", True),
+    ("knowledge", "core.modules.knowledge.router", True),
 ]
 _OPTIONAL_ROUTER_SPECS = [
     ("self_model_context", "core.api.self_model_context_routes", True),
@@ -718,6 +719,7 @@ for router, kwargs in [
     (globals().get("projects_router"), {}),
     (globals().get("evolution_router"), {}),
     (globals().get("memory_router"), {"dependencies": _INTERNAL_AUTH}),
+    (globals().get("knowledge_router"), {"dependencies": _INTERNAL_AUTH}),
 ]:
     _include_router_once(app, router, **kwargs)
 

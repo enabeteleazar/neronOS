@@ -23,6 +23,7 @@ from core.modules.status import (
     detect_status_intent,
 )
 from core.modules.memory import detect_memory_intent, build_memory_response_async
+from core.modules.knowledge import build_knowledge_response_async, detect_knowledge_intent
 from core.infrastructure.registry import service_registry
 from core.infrastructure.topology import build_topology
 from core.goal_engine import GoalRequest, goal_engine
@@ -41,6 +42,7 @@ class OrchestratorDecision:
     requires_llm: bool = False
     requires_timer: bool = False
     requires_memory: bool = False
+    requires_knowledge: bool = False
     requires_tool: bool = False
     requires_resolver: bool = False
     requires_agent_factory: bool = False
@@ -122,6 +124,7 @@ class CoreOrchestrator:
         timer_result = detect_timer_intent(routing_query)
         status_result = detect_status_intent(routing_query)
         memory_result = detect_memory_intent(routing_query)
+        knowledge_result = detect_knowledge_intent(routing_query)
         agent_invocation = _parse_agent_invocation(query)
 
         if normalized == "/help":
@@ -307,6 +310,16 @@ class CoreOrchestrator:
                 reason="Demande mémoire traitée via le Provider Registry.",
                 complexity="simple",
                 requires_memory=True,
+                requires_llm=False,
+            )
+        elif knowledge_result.get("matched"):
+            kind = knowledge_result.get("kind") or "query"
+            decision = OrchestratorDecision(
+                intent=f"knowledge_{kind}",
+                selected_route="knowledge_provider",
+                reason="Demande de consultation de documentation traitée via le Provider Registry.",
+                complexity="simple",
+                requires_knowledge=True,
                 requires_llm=False,
             )
         elif _requires_goal_pipeline(normalized):
@@ -538,6 +551,10 @@ class CoreOrchestrator:
         if route == "memory_provider":
             self._log_used("memory_provider_used", decision)
             return await self._execute_memory_provider(query, decision)
+
+        if route == "knowledge_provider":
+            self._log_used("knowledge_provider_used", decision)
+            return await self._execute_knowledge_provider(query, decision)
 
         if route == "resolver":
             self._log_used("resolver_used", decision)
@@ -964,6 +981,48 @@ class CoreOrchestrator:
         )
         lines = [f"- {item['content']}" for item in results]
         return "\n".join([header, *lines]), provider.name, metadata
+
+    async def _execute_knowledge_provider(
+        self,
+        query: str,
+        decision: OrchestratorDecision,
+    ) -> tuple[str, str, dict[str, Any]]:
+        """Mirroir simplifié de _execute_memory_provider — lecture seule,
+        une seule action utile ("query", ou "documents" pour lister)."""
+        kind = decision.intent.removeprefix("knowledge_") or "query"
+        providers = provider_registry.by_type("knowledge")
+        provider_info = providers[0] if providers else None
+        provider = provider_registry.get(provider_info.name) if provider_info else None
+
+        metadata = {
+            "selected_route": "knowledge_provider",
+            "executor": provider_info.name if provider_info else "knowledge_provider",
+            "fallback_used": False,
+            "retries": 0,
+            "knowledge_kind": kind,
+            "llm_used": False,
+        }
+
+        if provider is None:
+            return (
+                "La base de connaissances n'est pas disponible.",
+                "knowledge_provider",
+                {**metadata, "error": "knowledge provider unavailable"},
+            )
+
+        result = await build_knowledge_response_async(kind, query)
+        metadata.update(
+            {
+                "executor": provider.name,
+                "source": result.get("source"),
+                "a2a_used": result.get("a2a_used", False),
+                "knowledge_results": result.get("knowledge_results", []),
+            }
+        )
+        if "error" in result:
+            metadata["error"] = result["error"]
+
+        return result["response"], provider.name, metadata
 
     async def _execute_llm_provider(
         self,
