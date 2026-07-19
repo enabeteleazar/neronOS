@@ -25,7 +25,12 @@ class ExternalLLMProvider(ProviderProtocol):
     ) -> None:
         self.base_url = (base_url or os.getenv("NERON_LLM_URL") or "http://localhost:8765").rstrip("/")
         self.timeout = float(timeout or os.getenv("NERON_LLM_TIMEOUT") or 30)
+        self._api_key = os.getenv("NERON_API_KEY", "")
         self._status: ProviderStatus = "unknown"
+
+    @property
+    def _auth_headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
 
     @property
     def name(self) -> str:
@@ -46,7 +51,7 @@ class ExternalLLMProvider(ProviderProtocol):
     async def health(self) -> ProviderResponse:
         try:
             async with httpx.AsyncClient(timeout=min(self.timeout, 5.0)) as client:
-                response = await client.get(f"{self.base_url}/health")
+                response = await client.get(f"{self.base_url}/health", headers=self._auth_headers)
             self._status = "healthy" if response.status_code < 500 else "degraded"
             return ProviderResponse(
                 provider=self.name,
@@ -72,7 +77,7 @@ class ExternalLLMProvider(ProviderProtocol):
         }
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(f"{self.base_url}/{endpoint}", json=payload)
+                response = await client.post(f"{self.base_url}/{endpoint}", json=payload, headers=self._auth_headers)
             response.raise_for_status()
             data = response.json()
             result = data if isinstance(data, dict) else {"text": str(data)}
@@ -93,3 +98,4 @@ class ExternalLLMProvider(ProviderProtocol):
                 error=str(exc),
                 trace_id=request.trace_id,
             )
+
