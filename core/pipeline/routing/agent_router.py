@@ -260,10 +260,15 @@ def _invalid_agent_registry_text() -> str:
 
 async def _goal_status_text(query: str) -> str:
     from core.modules.goal_status_response import build_goal_status_response_async
-    from goal.goals.goal_manager import get_goal_manager
-    from goal.goals.goal_orchestrator import get_goal_orchestrator
+    from server.common.goal_client import GoalClientError, get_goal_client
 
-    active_goal = get_goal_manager().get_active_goal()
+    goal_client = get_goal_client()
+    try:
+        active_goal = await goal_client.get_active_goal()
+    except GoalClientError:
+        logger.exception("goal_service_unreachable route=goal_status_text")
+        active_goal = None
+
     if not active_goal:
         result = await build_goal_status_response_async(None, question=query)
         return result["response"]
@@ -271,7 +276,11 @@ async def _goal_status_text(query: str) -> str:
     goal_id = str(active_goal.get("id") or active_goal.get("goal_id") or "")
     status = dict(active_goal)
     if goal_id:
-        detailed = get_goal_orchestrator().get_goal_status(goal_id)
+        try:
+            detailed = await goal_client.get_goal_status(goal_id)
+        except GoalClientError:
+            logger.exception("goal_service_unreachable route=goal_status_text goal_id=%s", goal_id)
+            detailed = None
         if detailed:
             status = {**status, **detailed}
 
@@ -281,22 +290,30 @@ async def _goal_status_text(query: str) -> str:
 
 async def _project_status_text(query: str) -> str:
     from agents.factory.build_orchestrator import AgentBuildOrchestrator
-    from goal.projects.manager import get_project_manager
+    from server.common.goal_client import GoalClientError, get_goal_client
 
     normalized = _normalize(query)
     if "objectif" in normalized or "goal" in normalized:
         return await _goal_status_text(query)
 
-    manager = get_project_manager()
-    matches = manager.find_project_by_query(query, limit=1)
+    try:
+        matches = await get_goal_client().search_projects(query, limit=1)
+    except GoalClientError:
+        logger.exception("goal_service_unreachable route=project_status_text")
+        matches = []
     project = matches[0] if matches else None
     return AgentBuildOrchestrator().format_status_response(project)
 
 
-def _project_list_text() -> str:
-    from goal.projects.manager import get_project_manager
+async def _project_list_text() -> str:
+    from server.common.goal_client import GoalClientError, get_goal_client
 
-    projects = get_project_manager().list_projects(limit=20)
+    try:
+        projects = await get_goal_client().list_projects(limit=20)
+    except GoalClientError:
+        logger.exception("goal_service_unreachable route=project_list_text")
+        return "Service goal indisponible : impossible de lister les projets."
+
     if not projects:
         return "Aucun projet suivi."
 
@@ -610,7 +627,7 @@ class AgentRouter:
             return await _project_status_text(query)
 
         if intent == Intent.PROJECT_LIST:
-            return _project_list_text()
+            return await _project_list_text()
 
         if intent == Intent.AGENT_LIST:
             return _list_dynamic_agents()
@@ -636,10 +653,13 @@ class AgentRouter:
                 or "status des tâches" in q
                 or "status des taches" in q
             ):
-                from goal.system.task_manager import get_task_manager
+                from server.common.goal_client import GoalClientError, get_goal_client
 
-                manager = get_task_manager()
-                summary = manager.get_status_summary()
+                try:
+                    summary = await get_goal_client().get_task_summary()
+                except GoalClientError:
+                    logger.exception("goal_service_unreachable route=task_summary")
+                    return "Service goal indisponible : impossible de récupérer l'état des tâches."
 
                 return (
                     "État des tâches : "
@@ -657,10 +677,13 @@ class AgentRouter:
                 or "tâche suivante" in q
                 or "tache suivante" in q
             ):
-                from goal.system.task_manager import get_task_manager
+                from server.common.goal_client import GoalClientError, get_goal_client
 
-                manager = get_task_manager()
-                task = manager.get_next_task()
+                try:
+                    task = await get_goal_client().get_next_task()
+                except GoalClientError:
+                    logger.exception("goal_service_unreachable route=next_task")
+                    return "Service goal indisponible : impossible de récupérer la prochaine tâche."
 
                 if not task:
                     return "Aucune tâche en attente."
@@ -679,10 +702,13 @@ class AgentRouter:
                 or "commence la prochaine tâche" in q
                 or "commence la prochaine tache" in q
             ):
-                from goal.system.task_manager import get_task_manager
+                from server.common.goal_client import GoalClientError, get_goal_client
 
-                manager = get_task_manager()
-                task = manager.start_next_task()
+                try:
+                    task = await get_goal_client().start_next_task()
+                except GoalClientError:
+                    logger.exception("goal_service_unreachable route=start_next_task")
+                    return "Service goal indisponible : impossible de démarrer la prochaine tâche."
 
                 if not task:
                     return "Aucune tâche en attente à démarrer."

@@ -93,9 +93,10 @@ class CoreOrchestrator:
         intent_router: IntentRouter | None = None,
         agent_router: AgentRouter | None = None,
         capability_resolver: Any | None = None,
-        goal_orchestrator_factory: Any | None = None,
-        goal_execution_engine: Any | None = None,
-        goal_background_runner: Any | None = None,
+        goal_client: Any | None = None,
+        goal_orchestrator_factory: Any | None = None,  # deprecated (phase 3: HTTP)
+        goal_execution_engine: Any | None = None,  # deprecated (phase 3: HTTP)
+        goal_background_runner: Any | None = None,  # deprecated (phase 3: HTTP)
         goal_engine_instance: Any | None = None,
         runtime_governor: Any | None = None,
         agent_runtime_factory: Any | None = None,
@@ -103,9 +104,13 @@ class CoreOrchestrator:
         self.intent_router = intent_router or IntentRouter()
         self.agent_router = agent_router or AgentRouter()
         self._capability_resolver = capability_resolver
-        self._goal_orchestrator_factory = goal_orchestrator_factory
-        self._goal_execution_engine = goal_execution_engine
-        self._goal_background_runner = goal_background_runner
+        if goal_orchestrator_factory is not None or goal_execution_engine is not None or goal_background_runner is not None:
+            logger.warning(
+                "CoreOrchestrator: goal_orchestrator_factory/goal_execution_engine/"
+                "goal_background_runner sont dépréciés depuis la phase 3 (le "
+                "service goal est désormais appelé en HTTP) et sont ignorés."
+            )
+        self._goal_client = goal_client
         self._goal_engine = goal_engine_instance
         self._runtime_governor = runtime_governor
         self._agent_runtime_factory = agent_runtime_factory
@@ -477,10 +482,16 @@ class CoreOrchestrator:
             self._log_used("governor_used", decision)
         self._log_used("goal_pipeline_used", decision)
         self._log_used("planner_used", decision, usage="planning_only")
-        return await self._get_goal_orchestrator().run_goal(
-            objective.strip(),
-            source=source,
-        )
+        from server.common.goal_client import GoalClientError
+
+        try:
+            return await self._get_goal_client().run_goal(
+                objective.strip(),
+                source=source,
+            )
+        except GoalClientError:
+            logger.exception("goal_service_unreachable route=run_goal")
+            raise
 
     async def queue_goal(
         self,
@@ -497,24 +508,35 @@ class CoreOrchestrator:
         self._log_used("goal_pipeline_used", decision)
         self._log_used("planner_used", decision, usage="planning_only")
 
-        orchestrator = self._get_goal_orchestrator()
-        goal = orchestrator.queue_goal(objective.strip(), source=source)
-        goal_id = str(goal["id"])
+        from server.common.goal_client import GoalClientError
 
-        execution_engine = self._get_goal_execution_engine()
-        background_runner = self._get_goal_background_runner()
-        execution_engine.enqueue_goal(
-            goal_id,
-            objective.strip(),
-            source,
-            dict(goal.get("metadata") or {}),
-        )
-        background_runner.submit(
-            goal_id=goal_id,
-            objective=objective.strip(),
-            source=source,
-        )
-        return goal
+        objective_clean = objective.strip()
+        goal_client = self._get_goal_client()
+        try:
+            accepted = await goal_client.queue_goal(objective_clean, source=source)
+        except GoalClientError:
+            logger.exception("goal_service_unreachable route=queue_goal")
+            raise
+
+        goal_id = str(accepted.get("goal_id") or "")
+        detailed = await goal_client.get_goal_status(goal_id) if goal_id else None
+        # NOTE (phase 3) : avant, cette méthode retournait le dict "goal" brut
+        # produit en process par goal_orchestrator.queue_goal() — forme non
+        # documentée hors de ce repo. On restitue ici id/goal_id en double pour
+        # rester compatible avec un éventuel appelant lisant goal["id"], mais
+        # si un appelant externe dépend d'autres clés précises de l'ancien
+        # dict, il faudra les ajouter ici (grep `.queue_goal(` côté appelants).
+        if detailed is not None:
+            detailed.setdefault("id", goal_id)
+            detailed.setdefault("goal_id", goal_id)
+            return detailed
+        return {
+            "id": goal_id,
+            "goal_id": goal_id,
+            "status": accepted.get("status", "queued"),
+            "objective": objective_clean,
+            "source": source,
+        }
 
     async def _execute(
         self,
@@ -629,10 +651,16 @@ class CoreOrchestrator:
             self._log_used("goal_pipeline_used", decision)
             self._log_used("planner_used", decision, usage="planning_only")
             objective = re.sub(r"^\s*/goal\s+", "", query, flags=re.IGNORECASE)
-            result = await self._get_goal_orchestrator().run_goal(
-                objective,
-                source=source_channel,
-            )
+            from server.common.goal_client import GoalClientError
+
+            try:
+                result = await self._get_goal_client().run_goal(
+                    objective,
+                    source=source_channel,
+                )
+            except GoalClientError:
+                logger.exception("goal_service_unreachable route=goal_pipeline")
+                raise
             return _goal_response_text(result), "goal_pipeline", {"goal": result}
 
         if route == "agent_factory":
@@ -1171,12 +1199,14 @@ class CoreOrchestrator:
             self._capability_resolver = CapabilityResolver()
         return self._capability_resolver
 
-    def _get_goal_orchestrator(self) -> Any:
-        if self._goal_orchestrator_factory is None:
-            from goal.goals.goal_orchestrator import get_goal_orchestrator
+    def _get_goal_client(self) -> Any:
+        # Phase 3 : le service goal tourne dans son propre process. On ne
+        # l'appelle plus jamais par import direct, uniquement en HTTP.
+        if self._goal_client is None:
+            from server.common.goal_client import get_goal_client
 
-            self._goal_orchestrator_factory = get_goal_orchestrator
-        return self._goal_orchestrator_factory()
+            self._goal_client = get_goal_client()
+        return self._goal_client
 
     def _get_runtime_governor(self) -> Any:
         if self._runtime_governor is None:
@@ -1184,20 +1214,6 @@ class CoreOrchestrator:
 
             self._runtime_governor = get_runtime_governor()
         return self._runtime_governor
-
-    def _get_goal_execution_engine(self) -> Any:
-        if self._goal_execution_engine is None:
-            from goal.goals.execution_engine import get_goal_execution_engine
-
-            self._goal_execution_engine = get_goal_execution_engine()
-        return self._goal_execution_engine
-
-    def _get_goal_background_runner(self) -> Any:
-        if self._goal_background_runner is None:
-            from goal.goals.background_runner import get_goal_background_runner
-
-            self._goal_background_runner = get_goal_background_runner()
-        return self._goal_background_runner
 
     def _get_goal_engine(self) -> Any:
         if self._goal_engine is None:
