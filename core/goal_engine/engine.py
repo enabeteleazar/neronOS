@@ -245,7 +245,7 @@ class GoalEngine:
     @staticmethod
     def _supervised_creation_allowed(analysis: GoalAnalysis) -> bool:
         required = set(analysis.required_capabilities)
-        return "agent_creation" in required and "weather" in required
+        return "agent_creation" in required
 
     def build_plan(
         self,

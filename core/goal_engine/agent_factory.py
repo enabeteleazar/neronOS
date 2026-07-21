@@ -99,11 +99,7 @@ class AgentFactory:
                 "a2a_task_execution",
                 "sandbox_permissions",
             ],
-            validation_task=(
-                "Météo actuelle à Paris"
-                if "weather" in capabilities
-                else analysis.objective
-            ),
+            validation_task=analysis.objective,
         )
 
     def create_plan(self, request: AgentCreationRequest) -> AgentCreationPlan:
@@ -139,8 +135,13 @@ class AgentFactory:
                 },
             ))
             result = response.result if isinstance(response.result, dict) else {}
-            source = _strip_code_fence(str(result.get("text") or ""))
+            source = _strip_code_fence(str(result.get("result") or ""))
             if response.error or not source:
+                if attempt == 0:
+                    validation_error = RuntimeError(
+                        response.error or result.get("warning") or "LLM generated empty source"
+                    )
+                    continue
                 raise RuntimeError(response.error or result.get("warning") or "LLM generated empty source")
             source = self._normalize_contract(source, spec)
             try:
@@ -170,7 +171,7 @@ class AgentFactory:
             agent_file=str(agent_file),
             test_file=str(test_file),
             manifest_file=str(manifest_file),
-            model=str(result.get("model") or ""),
+            model=str(result.get("model_used") or ""),
             test_passed=False,
         )
 
@@ -190,7 +191,13 @@ class AgentFactory:
         source = agent_file.read_text(encoding="utf-8")
         body = source.split("\nAGENT_SPEC =", 1)[0].rstrip()
         body = AgentFactory._normalize_contract(body, plan.spec)
-        AgentFactory._validate_source(body, plan.spec)
+        try:
+            AgentFactory._validate_source(body, plan.spec)
+        except (SyntaxError, ValueError):
+            # Candidat en cache invalide (ex: genere avant un durcissement de
+            # la validation) -> on l'ignore et on laisse generate_supervised
+            # en creer un nouveau, plutot que de faire echouer tout le pipeline.
+            return None
         agent_file.write_text(
             body + "\n\nAGENT_SPEC = " + repr(AgentFactory._runtime_spec(plan.spec)) + "\n",
             encoding="utf-8",
@@ -220,26 +227,41 @@ class AgentFactory:
             raise RuntimeError("LLMProvider unavailable for supervised repair")
         source = Path(artifacts.agent_file).read_text(encoding="utf-8")
         source = source.split("\nAGENT_SPEC =", 1)[0].rstrip()
-        response = await llm.execute(ProviderRequest(
-            action="generate",
-            payload={
-                "task_type": "agent",
-                "model_preference": "Qwen2.5-Coder:1.5b",
-                "prompt": self._repair_prompt(plan.spec, source, error[-400:]),
-            },
-        ))
-        result = response.result if isinstance(response.result, dict) else {}
-        repaired = self._normalize_contract(
-            _strip_code_fence(str(result.get("text") or "")),
-            plan.spec,
-        )
-        if response.error or not repaired:
-            raise RuntimeError(response.error or result.get("warning") or "LLM repair returned empty source")
-        self._validate_source(repaired, plan.spec)
-        repaired = repaired.rstrip() + "\n\nAGENT_SPEC = " + repr(self._runtime_spec(plan.spec)) + "\n"
-        Path(artifacts.agent_file).write_text(repaired, encoding="utf-8")
-        artifacts.model = str(result.get("model") or artifacts.model)
-        return artifacts
+        prompt = self._repair_prompt(plan.spec, source, error[-400:])
+        last_error: Exception | None = None
+        for attempt in range(2):
+            response = await llm.execute(ProviderRequest(
+                action="generate",
+                payload={
+                    "task_type": "agent",
+                    "model_preference": "Qwen2.5-Coder:1.5b",
+                    "prompt": prompt,
+                },
+            ))
+            result = response.result if isinstance(response.result, dict) else {}
+            repaired = self._normalize_contract(
+                _strip_code_fence(str(result.get("result") or "")),
+                plan.spec,
+            )
+            if response.error or not repaired:
+                last_error = RuntimeError(
+                    response.error or result.get("warning") or "LLM repair returned empty source"
+                )
+                if attempt == 0:
+                    continue
+                raise last_error
+            try:
+                self._validate_source(repaired, plan.spec)
+            except (SyntaxError, ValueError) as exc:
+                last_error = exc
+                if attempt == 0:
+                    continue
+                raise
+            repaired = repaired.rstrip() + "\n\nAGENT_SPEC = " + repr(self._runtime_spec(plan.spec)) + "\n"
+            Path(artifacts.agent_file).write_text(repaired, encoding="utf-8")
+            artifacts.model = str(result.get("model_used") or artifacts.model)
+            return artifacts
+        raise last_error or RuntimeError("LLM repair failed after retries")
 
     @staticmethod
     def promote(
@@ -247,7 +269,22 @@ class AgentFactory:
         *,
         generated_dir: Path = NERON_DATA_DIR / "generated_agents",
         tests_dir: Path = NERON_DATA_DIR / "generated_agent_tests",
+        requested_by: str = "goal_engine",
     ) -> AgentCreationArtifacts:
+        from core.runtime.governor import get_runtime_governor
+
+        governor = get_runtime_governor()
+        agent_name = Path(artifacts.agent_file).stem
+        allowed = governor.authorize_agent_promotion(
+            agent_name=agent_name,
+            requested_by=requested_by,
+        )
+        if not allowed:
+            raise PermissionError(
+                f"runtime_governor_refused: promotion de l'agent '{agent_name}' "
+                f"refusee (runtime_mode={governor.policy.runtime_mode})"
+            )
+
         generated_dir.mkdir(parents=True, exist_ok=True)
         tests_dir.mkdir(parents=True, exist_ok=True)
         source_agent = Path(artifacts.agent_file)
@@ -305,10 +342,13 @@ class AgentFactory:
             "Generate complete executable Python source, never placeholders. "
             f"Define class Agent with name={spec.name!r} and capabilities={spec.capabilities!r}. "
             "Define async execute(self, text: str = '', context: dict | None = None) -> dict. "
-            "Read normalized real weather from context['weather']; do not perform network or file IO. "
-            "Return status='ok', agent name, source from weather, temperature_c, weather_code, "
-            "and a non-empty French response containing location and temperature. "
-            "Allowed code: pure Python only, no imports are necessary. "
+            "Allowed code: pure Python only, no imports are necessary, no network or file IO. "
+            f"The agent's role is: {spec.role!r}. "
+            f"The objective to fulfil is: {spec.validation_task!r}. "
+            "Implement the logic to fulfil this objective using only the 'text' input "
+            "parameter; ignore 'context' if it is not relevant. "
+            "Return a dict with at least status='ok' and a non-empty French key 'response' "
+            "describing the result. "
             "Output only Python source without markdown or explanations."
         )
 
@@ -317,12 +357,10 @@ class AgentFactory:
         return (
             "Repair the following generated Python agent. Output only the complete corrected source. "
             f"Validation error: {error}. "
-            "Critical rule: weather data is already supplied in context['weather']; "
-            "remove all HTTP, requests, urllib, network and file access. "
-            "context['weather'] is already a Python dict: never call json.loads on it. "
-            f"Agent.name must be {spec.name!r}; execute must remain async and return status ok, "
-            "source, temperature_c, weather_code, and key 'response' containing French text "
-            "with location and temperature. Read temperature_c, not temp_c.\n"
+            "Critical rule: remove all HTTP, requests, urllib, network and file access. "
+            f"Agent.name must be {spec.name!r}; execute must remain async and return a dict "
+            "with at least status='ok' and a non-empty French key 'response' describing "
+            "the result.\n"
             "SOURCE TO REPAIR:\n"
             + source
         )
@@ -359,6 +397,18 @@ class AgentFactory:
         )
         if execute is None:
             raise ValueError("generated agent has no async execute")
+        init = next(
+            (node for node in agent.body if isinstance(node, ast.FunctionDef) and node.name == "__init__"),
+            None,
+        )
+        if init is not None:
+            positional = init.args.args[1:]  # skip 'self'
+            required = len(positional) - len(init.args.defaults)
+            if required > 0:
+                raise ValueError(
+                    "generated agent __init__ must not require positional arguments "
+                    "beyond self"
+                )
         assignments = {
             target.id: ast.literal_eval(node.value)
             for node in agent.body
@@ -395,33 +445,6 @@ class AgentFactory:
                 "class Agent:\n" + "\n".join(additions),
                 1,
             )
-        if "weather" in spec.capabilities:
-            source = re.sub(
-                r"(?m)^(\s*)async def execute\(self,.*context.*\)\s*->\s*dict:$",
-                r"\1async def execute(self, text: str = '', execution_context=None) -> dict:",
-                source,
-                count=1,
-            )
-            signature = "async def execute(self, text: str = '', execution_context=None) -> dict:"
-            if signature in source and "context = execution_context.context" not in source:
-                source = source.replace(
-                    signature,
-                    signature
-                    + "\n        context = execution_context.context if execution_context else {}",
-                    1,
-                )
-            source = re.sub(
-                r"(?m)^(\s*)['\"]source['\"]\s*:\s*.+,$",
-                r"\1'source': context.get('weather', {}).get('source', ''),",
-                source,
-                count=1,
-            )
-            source = re.sub(
-                r"(?m)^(\s*)['\"]french_response['\"]\s*:",
-                r"\1'response':",
-                source,
-                count=1,
-            )
         return source
 
     @staticmethod
@@ -441,7 +464,7 @@ class AgentFactory:
             "agent": spec.model_dump(mode="json"),
             "generation": {
                 "provider": "llm",
-                "model": llm_result.get("model"),
+                "model": llm_result.get("model_used"),
                 "supervised": True,
             },
         }
@@ -452,33 +475,23 @@ class AgentFactory:
             "import asyncio\nimport importlib.util\n\n"
             f"AGENT_FILE = {str(agent_file)!r}\n\n"
             "def test_generated_agent_contract():\n"
-            "    module_spec = importlib.util.spec_from_file_location('generated_weather_agent', AGENT_FILE)\n"
+            "    module_spec = importlib.util.spec_from_file_location('generated_agent', AGENT_FILE)\n"
             "    module = importlib.util.module_from_spec(module_spec)\n"
             "    module_spec.loader.exec_module(module)\n"
-            "    execution_context = type('Context', (), {'context': {'weather': {"
-            "'location': 'Paris', 'temperature_c': 20.5, 'weather_code': 1, "
-            "'source': 'open-meteo'}}})()\n"
-            "    result = asyncio.run(module.Agent().execute("
-            "'Météo actuelle à Paris', execution_context=execution_context))\n"
+            f"    result = asyncio.run(module.Agent().execute({spec.validation_task!r}))\n"
             "    assert result['status'] == 'ok'\n"
-            "    assert result['source'] == 'open-meteo'\n"
-            "    assert 'Paris' in result['response']\n"
-            "    assert '20.5' in result['response']\n"
+            "    assert isinstance(result.get('response'), str) and result['response'].strip()\n"
         )
 
     @staticmethod
     def _proposed_name(capabilities: list[str]) -> str:
-        preferred = (
-            "weather"
-            if "weather" in capabilities
-            else next(
+        preferred = next(
             (
                 capability
                 for capability in capabilities
                 if capability not in {"agent_creation", "planning", "generic"}
             ),
             capabilities[0],
-            )
         )
         base = re.sub(r"[^a-z0-9]+", "_", preferred.lower()).strip("_")
         return f"{base or 'generic'}_agent"

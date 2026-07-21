@@ -142,8 +142,8 @@ class CoreOrchestrator:
         elif explicit_route == "goal_pipeline" or normalized.startswith("/goal "):
             decision = OrchestratorDecision(
                 intent="goal",
-                selected_route="goal_pipeline",
-                reason="Commande goal explicite recue par le Core.",
+                selected_route="goal_engine",
+                reason="Commande goal explicite recue par le Core, deleguee au Goal Engine.",
                 complexity="complex",
                 requires_goal_pipeline=True,
                 requires_governor=True,
@@ -634,8 +634,9 @@ class CoreOrchestrator:
 
         if route == "goal_engine":
             self._log_used("goal_engine_used", decision)
+            objective = re.sub(r"^\s*/goal\s+", "", query, flags=re.IGNORECASE)
             goal_request = GoalRequest(
-                objective=query,
+                objective=objective,
                 source=source_channel,
                 user_id=user_id,
                 metadata=request_metadata,
