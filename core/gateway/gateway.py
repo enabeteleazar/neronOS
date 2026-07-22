@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 # (qui applique lui-même AUDIO_MAX_MB — cette limite protège juste le decode).
 MAX_VOICE_AUDIO_BYTES = 15 * 1024 * 1024  # 15 MB
 
+print(">>> GATEWAY.PY CHARGÉ DEPUIS CE FICHIER <<<", flush=True)
 logger = logging.getLogger("neron.gateway")
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -222,6 +223,7 @@ class NeronGateway:
             logger.debug("[%s] JSON decode error: %s", client.client_id, e)
             await self._send(client.ws, _error(None, ERROR_PARSE_ERROR, "Parse error"))
             return
+
 
         if not isinstance(frame, dict):
             await self._send(
@@ -437,7 +439,6 @@ class NeronGateway:
         """
         try:
             from core.pipeline.orchestrator import get_core_orchestrator
-
             result = await get_core_orchestrator().handle(
                 message,
                 session_id=session_id,
