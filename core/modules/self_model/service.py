@@ -1,208 +1,40 @@
 from __future__ import annotations
 
-import json
-import os
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
-from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
 
-from core.config.paths import NERON_DATA_DIR
-from core.identity import get_identity
-from core.modules.status.service import build_status_payload
-
-
-DEFAULT_TZ = "Europe/Paris"
-STATE_PATH = Path(
-    os.getenv(
-        "NERON_SELF_MODEL_STATE_PATH",
-        str(NERON_DATA_DIR / "self_model_state.json"),
-    )
+from core.modules.self_model.identity_snapshot import _safe_identity
+from core.modules.self_model.state import (
+    STATE_PATH,
+    _now_iso,
+    _read_state,
+    _write_state,
 )
-
-
-def _now_iso() -> str:
-    return datetime.now(ZoneInfo(DEFAULT_TZ)).isoformat()
-
-
-def _read_state() -> dict[str, Any]:
-    if not STATE_PATH.exists():
-        return {}
-    try:
-        data = json.loads(STATE_PATH.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-def _write_state(data: dict[str, Any]) -> None:
-    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = STATE_PATH.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(STATE_PATH)
-
-
-def _safe_identity() -> dict[str, Any]:
-    try:
-        return dict(get_identity())
-    except Exception as exc:
-        return {"name": "Néron", "status": "unavailable", "error": str(exc)}
-
-
-def _safe_memory_status() -> dict[str, Any]:
-    try:
-        from core.providers.registry import provider_registry
-
-        providers = provider_registry.by_type("memory")
-        if not providers:
-            return {"ok": False, "status": "unavailable", "provider": None}
-        provider = _normalize_provider(providers[0].model_dump(mode="json"))
-        return {
-            "ok": provider["status"] in {"healthy", "degraded"},
-            "status": provider["status"],
-            "provider": provider,
-            "source": "provider_registry",
-        }
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-def _safe_providers() -> dict[str, Any]:
-    try:
-        from core.providers.registry import provider_registry
-
-        payload = provider_registry.status()
-        providers = [
-            _normalize_provider(provider)
-            for provider in payload.get("providers", [])
-        ]
-        payload["providers"] = providers
-        payload["by_name"] = {
-            provider["name"]: provider for provider in providers
-        }
-        return payload
-    except Exception as exc:
-        return {"count": 0, "providers": [], "capabilities": [], "error": str(exc)}
-
-
-def _safe_a2a() -> dict[str, Any]:
-    try:
-        from core.a2a import a2a_client
-
-        payload = a2a_client.status()
-        payload["agents"] = [
-            _normalize_agent(agent, default_manager="a2a")
-            for agent in payload.get("agents", [])
-        ]
-        return payload
-    except Exception as exc:
-        return {"available": False, "agent_count": 0, "agents": [], "error": str(exc)}
-
-
-def _safe_agents() -> dict[str, Any]:
-    try:
-        from core.goal_engine import agent_registry
-
-        agent_registry.load_existing_agents()
-        payload = agent_registry.status()
-        payload["agents"] = [
-            _normalize_agent(agent, default_manager="agent_registry")
-            for agent in payload.get("agents", [])
-        ]
-        return payload
-    except Exception as exc:
-        return {"count": 0, "available_count": 0, "agents": [], "error": str(exc)}
-
-
-def _safe_registered_services() -> dict[str, Any]:
-    try:
-        from core.infrastructure.registry import service_registry
-
-        services = service_registry.list_services()
-        return {
-            "count": len(services),
-            "services": services,
-            "source": "service_registry",
-        }
-    except Exception as exc:
-        return {"count": 0, "services": [], "source": "service_registry", "error": str(exc)}
-
-
-def _safe_goal_engine() -> dict[str, Any]:
-    try:
-        from core.goal_engine import goal_engine
-
-        return goal_engine.status()
-    except Exception as exc:
-        return {"status": "unavailable", "error": str(exc)}
-
-
-def _normalize_provider(provider: dict[str, Any]) -> dict[str, Any]:
-    return {
-        **provider,
-        "kind": "provider",
-        "runtime_type": "persistent",
-        "managed_by": "provider_registry",
-    }
-
-
-def _normalize_agent(
-    agent: dict[str, Any],
-    *,
-    default_manager: str,
-) -> dict[str, Any]:
-    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-    source = str(metadata.get("source") or "")
-    agent_id = str(agent.get("agent_id") or "")
-    runtime_type = str(metadata.get("runtime_type") or "")
-    if runtime_type not in {"persistent", "temporary", "unknown"}:
-        if agent_id == "local_mock":
-            runtime_type = "temporary"
-        elif source in {"core_builtin", "agent_runtime"}:
-            runtime_type = "persistent"
-        else:
-            runtime_type = "unknown"
-    managed_by = str(metadata.get("managed_by") or "")
-    if managed_by not in {"provider_registry", "agent_registry", "a2a", "goal", "unknown"}:
-        managed_by = "goal" if source == "agent_runtime" else default_manager
-    return {
-        **agent,
-        "kind": "agent",
-        "runtime_type": runtime_type,
-        "managed_by": managed_by,
-    }
-
-
-def _agent_topology(
-    agents: dict[str, Any],
-    a2a: dict[str, Any],
-) -> dict[str, Any]:
-    unified: dict[str, dict[str, Any]] = {}
-    for source_name, collection in (
-        ("agent_registry", agents.get("agents") or []),
-        ("a2a", a2a.get("agents") or []),
-    ):
-        for item in collection:
-            if not isinstance(item, dict):
-                continue
-            agent_id = str(item.get("agent_id") or "")
-            if not agent_id:
-                continue
-            current = unified.get(agent_id)
-            if current is None:
-                unified[agent_id] = {**item, "sources": [source_name]}
-            elif source_name == "a2a":
-                sources = list(dict.fromkeys([*current["sources"], source_name]))
-                unified[agent_id] = {**item, "sources": sources}
-            elif source_name not in current["sources"]:
-                current["sources"].append(source_name)
-    return {
-        "count": len(unified),
-        "agents": [unified[key] for key in sorted(unified)],
-        "source": ["agent_registry", "a2a"],
-    }
+from core.modules.self_model.providers_snapshot import (
+    _agent_topology,
+    _normalize_agent,
+    _normalize_provider,
+    _safe_a2a,
+    _safe_agents,
+    _safe_memory_status,
+    _safe_providers,
+)
+from core.modules.self_model.goals_snapshot import (
+    _safe_goal_engine,
+    _safe_goal_runtime,
+    _safe_registered_services,
+    _safe_task_state,
+)
+from core.modules.self_model.runtime_snapshot import (
+    _runtime_from_status,
+    _services_from_status,
+)
+from core.modules.self_model.cognitive import (
+    _architecture_snapshot,
+    _cognitive_state_from_status,
+)
+from core.modules.status.service import build_status_payload
 
 
 def _capability_snapshot(
@@ -226,174 +58,6 @@ def _capability_snapshot(
         "providers": sorted(provider_capabilities),
         "agents": sorted(agent_capabilities),
         "source": ["provider_registry", "a2a_client", "agent_registry"],
-    }
-
-
-def _architecture_snapshot() -> dict[str, Any]:
-    return {
-        "name": "NéronOS distributed kernel",
-        "kernel": "core",
-        "decision": "orchestrator",
-        "goal_execution": "goal_engine",
-        "capabilities": "provider_registry",
-        "agents": "a2a_client",
-        "agent_presence_execution": "provider_agent_planned",
-        "memory": "memory_provider",
-        "service_discovery": "service_registry",
-        "self_awareness": "self_model",
-        "principles": [
-            "Core minimal",
-            "Providers pour les capacités",
-            "A2A pour les agents",
-            "Goal Engine pour les objectifs",
-            "Service Registry pour la topologie runtime",
-            "Goal Engine développe les agents et leurs modules",
-            "Provider Agent gérera la présence et l'exécution des agents",
-            "Providers exposent uniquement des capacités stables",
-        ],
-        "separation": {
-            "providers": {
-                "kind": "provider",
-                "role": "Exposer une capacité stable via Provider Registry",
-                "managed_by": "provider_registry",
-            },
-            "agents": {
-                "kind": "agent",
-                "role": "Exécuter une capacité spécialisée via A2A",
-                "developed_by": "goal_engine",
-                "future_manager": "provider_agent",
-            },
-        },
-    }
-
-
-def _safe_goal_runtime() -> dict[str, Any]:
-    goal: dict[str, Any] | None = None
-    runtime_status: dict[str, Any] | None = None
-
-    try:
-        from goal.goals.goal_manager import get_goal_manager
-
-        goal = get_goal_manager().get_active_goal()
-    except Exception:
-        goal = None
-
-    goal_id = None
-    if isinstance(goal, dict):
-        goal_id = goal.get("id") or goal.get("goal_id")
-
-    if goal_id:
-        try:
-            from goal.goals.execution_engine import get_goal_execution_engine
-
-            runtime_status = get_goal_execution_engine().get_goal_status(str(goal_id))
-        except Exception as exc:
-            runtime_status = {"error": str(exc)}
-
-    return {
-        "active_goal": goal,
-        "runtime_status": runtime_status,
-    }
-
-
-def _safe_task_state() -> dict[str, Any]:
-    try:
-        from goal.system.task_manager import get_task_manager
-
-        tasks = get_task_manager().list_tasks()
-    except Exception as exc:
-        return {
-            "summary": {
-                "total": 0,
-                "active": 0,
-                "pending": 0,
-                "running": 0,
-                "failed": 0,
-            },
-            "error": str(exc),
-        }
-
-    statuses = [
-        str(task.get("status") or "unknown").lower()
-        for task in tasks
-        if isinstance(task, dict)
-    ]
-    return {
-        "summary": {
-            "total": len(statuses),
-            "active": sum(
-                status in {"pending", "active", "todo", "in_progress", "running"}
-                for status in statuses
-            ),
-            "pending": sum(
-                status in {"pending", "todo", "queued"}
-                for status in statuses
-            ),
-            "running": sum(
-                status in {"running", "in_progress"}
-                for status in statuses
-            ),
-            "failed": sum(
-                status in {"failed", "error"}
-                for status in statuses
-            ),
-        }
-    }
-
-
-def _runtime_from_status(status: dict[str, Any]) -> dict[str, Any]:
-    resources = status.get("resources") or {}
-    return {
-        "cpu_usage": resources.get("cpu_pct"),
-        "ram_usage": resources.get("ram_pct"),
-        "disk_usage": resources.get("disk_pct"),
-        "source": "status_module",
-    }
-
-
-def _services_from_status(status: dict[str, Any]) -> dict[str, Any]:
-    modules = status.get("modules") or {}
-    items = {"core": status.get("core", "unknown")}
-    items.update({f"module:{name}": state for name, state in modules.items()})
-    items["goal_pipeline"] = status.get("goal_pipeline", "unknown")
-
-    active = [name for name, state in items.items() if state in {"online", "loaded", "available"}]
-    inactive = [name for name, state in items.items() if name not in active]
-
-    return {
-        "items": items,
-        "summary": {
-            "total": len(items),
-            "active": len(active),
-            "inactive": len(inactive),
-            "all_active": len(inactive) == 0,
-        },
-    }
-
-
-def _cognitive_state_from_status(
-    status: dict[str, Any],
-    diagnostics: list[str],
-) -> dict[str, Any]:
-    operationally_healthy = status.get("global_status") == "healthy"
-    consolidated_healthy = operationally_healthy and not diagnostics
-    state = "stable" if consolidated_healthy else "warning"
-    runtime_mode = "normal" if consolidated_healthy else "prudent"
-    severity_score = 0 if consolidated_healthy else 45
-    return {
-        "state": state,
-        "severity_score": severity_score,
-        "primary_issue": None if consolidated_healthy else "consolidated_state_warning",
-        "runtime_pressure": "normal" if consolidated_healthy else "moderate",
-        "autonomy_available": consolidated_healthy,
-        "degraded_mode": not consolidated_healthy,
-        "critical_services_ok": operationally_healthy,
-        "runtime_mode": runtime_mode,
-        "planner_enabled": True,
-        "heavy_reasoning_allowed": consolidated_healthy,
-        "autonomous_actions_allowed": True,
-        "max_parallel_agents": 3 if consolidated_healthy else 1,
-        "source": "self_model_consolidation",
     }
 
 

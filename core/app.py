@@ -119,13 +119,11 @@ TOKEN = HA_CONFIG.get("token")
 SYNC_INTERVAL = HA_CONFIG.get("sync_interval", 60)
 
 _CORE_ROUTER_SPECS = [
-    ("selfmodel", "core.api.selfmodel_routes", True),
     ("self_model", "core.api.self_model_routes", True),
     ("memory", "core.modules.memory.router", True),
     ("knowledge", "core.modules.knowledge.router", True),
 ]
 _OPTIONAL_ROUTER_SPECS = [
-    ("self_model_context", "core.api.self_model_context_routes", True),
     ("runtime_governor", "core.api.runtime_governor_routes", True),
     ("world_model", "core.api.world_model_routes", True),
     ("task", "core.api.task_routes", False),
