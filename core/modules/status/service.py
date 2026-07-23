@@ -34,7 +34,7 @@ def _system_resources() -> dict[str, float | int | str]:
         import psutil
 
         return {
-            "cpu_pct": round(float(psutil.cpu_percent(interval=None)), 1),
+            "cpu_pct": round(float(psutil.cpu_percent(interval=0.1)), 1),
             "ram_pct": round(float(psutil.virtual_memory().percent), 1),
             "disk_pct": round(float(psutil.disk_usage("/").percent), 1),
         }
