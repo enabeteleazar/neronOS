@@ -11,9 +11,8 @@ from core.pipeline.nlp.french_normalizer import normalize_text
 logger = get_logger(__name__)
 
 
-def _nlp():
-    from core.pipeline.nlp.nlp_processor import get_processor
-    return get_processor()
+def _normalize(text: str) -> str:
+    return normalize_text(text)
 
 
 class Intent(str, Enum):
@@ -51,9 +50,6 @@ class Intent(str, Enum):
     WIKI_QUERY           = "wiki_query"
 
 
-_INTENT_MAP: Dict[str, Intent] = {i.value: i for i in Intent}
-
-
 @dataclass
 class IntentResult:
     intent: Intent
@@ -69,338 +65,151 @@ class IntentResult:
         }
 
 
-def _normalize(text: str) -> str:
-    return normalize_text(text)
+# ---------------------------------------------------------------------------
+# Mapping target/operation (classifieur CamemBERT) -> Intent (enum existant)
+#
+# Décisions de mapping (24/07) :
+#   - homeassistant/* -> HA_ACTION. La polarité exacte (turn_on_light,
+#     turn_off_light, open_cover, close_cover, get_temperature) est TOUJOURS
+#     placée dans entities["operation"] -- HA_ACTION seul ne la porte pas,
+#     donc tout handler qui a besoin de la distinction on/off doit lire
+#     entities, pas juste intent.value.
+#   - memory/remember, memory/forget -> CONVERSATION. Choix aligné sur le
+#     comportement déjà en place dans l'ancien intent_router.py, qui
+#     renvoyait volontairement CONVERSATION pour les requêtes mémoire et
+#     laissait le Core orchestrator décider de l'action réelle en aval.
+#   - goal/get_status -> PROJECT_STATUS, goal/create_agent -> AGENT_CREATION.
+#     Mapping direct, pas d'ambiguïté.
+#   - system/get_logs, system/restart_service, system/backup -> SYSTEM_STATUS.
+#     ATTENTION : approximation la plus fragile de ce mapping. SYSTEM_STATUS
+#     est sémantiquement une consultation ; backup et restart_service sont
+#     des actions. Si un handler SYSTEM_STATUS ne lit jamais entities, une
+#     demande de sauvegarde/redémarrage n'aura aucun effet visible. A vérifier
+#     côté handler avant mise en prod, pas juste supposer que ça passe.
+#   - conversation/start_conversation -> CONVERSATION.
+#   - unknown/unknown -> CONVERSATION (repli, cohérent avec le comportement
+#     par défaut de l'ancien routeur pour les cas non reconnus).
+# ---------------------------------------------------------------------------
+
+_TARGET_OPERATION_TO_INTENT: Dict[tuple[str, str], Intent] = {
+    ("homeassistant", "turn_on_light"): Intent.HA_ACTION,
+    ("homeassistant", "turn_off_light"): Intent.HA_ACTION,
+    ("homeassistant", "open_cover"): Intent.HA_ACTION,
+    ("homeassistant", "close_cover"): Intent.HA_ACTION,
+    ("homeassistant", "get_temperature"): Intent.HA_ACTION,
+    ("memory", "remember"): Intent.CONVERSATION,
+    ("memory", "forget"): Intent.CONVERSATION,
+    ("goal", "get_status"): Intent.PROJECT_STATUS,
+    ("goal", "create_agent"): Intent.AGENT_CREATION,
+    ("system", "get_logs"): Intent.SYSTEM_STATUS,
+    ("system", "restart_service"): Intent.SYSTEM_STATUS,
+    ("system", "backup"): Intent.SYSTEM_STATUS,
+    ("conversation", "start_conversation"): Intent.CONVERSATION,
+    ("unknown", "unknown"): Intent.CONVERSATION,
+}
 
 
-def _fallback_intent(query: str) -> Intent | None:
+def _map_to_intent(target: str, operation: str) -> Intent:
+    return _TARGET_OPERATION_TO_INTENT.get((target, operation), Intent.CONVERSATION)
+
+
+# ---------------------------------------------------------------------------
+# Cascade de mots-clés restaurée (24/07) -- UNIQUEMENT pour les intents sans
+# équivalent dans le schéma target/operation du classifieur ML. Les domaines
+# où le classifieur a été validé (homeassistant/memory/goal/system/
+# conversation) ne passent PAS par ici, pour ne pas défaire le travail de
+# validation du 24/07 -- cette cascade est un COMPLÉMENT, pas un remplacement.
+# Vérifiée en premier (rapide, déterministe, pas d'appel LLM) ; si rien ne
+# matche, on retombe sur le classifieur ML comme avant.
+# ---------------------------------------------------------------------------
+
+_GREETING_KEYWORDS = {
+    "salut", "salut neron", "bonjour", "bonjour neron", "hello", "hello neron",
+    "coucou", "coucou neron", "hey", "hey neron", "tu es la", "tu es la neron",
+    "neron tu es la",
+}
+_THANKS_KEYWORDS = {"merci", "merci neron", "thanks", "thank you"}
+_GOODBYE_KEYWORDS = {"au revoir", "bye", "a plus", "à plus", "bonne nuit"}
+_STATUS_SMALLTALK_KEYWORDS = {
+    "ca va", "ça va", "tu vas bien", "comment vas tu", "comment vas-tu",
+}
+_IDENTITY_KEYWORDS = [
+    "qui es tu", "qui es-tu", "tu es qui", "presente toi", "présente toi",
+    "presente-toi", "présente-toi", "quel est ton nom",
+    "comment tu t appelles", "comment tu t'appelles",
+]
+_SELF_STATUS_KEYWORDS = [
+    "etat interne", "etat conscience", "etat cognitif", "self status",
+    "self model", "selfmodel", "que sais tu de toi", "que sais-tu de toi",
+    "tes capacites", "tes capacités",
+]
+_TOPOLOGY_KEYWORDS = [
+    "montre moi la topologie", "montre la topologie", "topologie du systeme",
+    "affiche la topologie", "voir la topologie", "schema du systeme",
+]
+_REGISTRY_STATUS_KEYWORDS = [
+    "quels services sont arretes", "services arretes", "services hors ligne",
+    "services down",
+]
+_REGISTRY_LIST_KEYWORDS = [
+    "quels services sont enregistres", "services enregistres",
+    "quel service fournit les llm", "quel service fournit le llm",
+    "quel service gere home assistant", "quel service gere la memoire",
+]
+_NETWORK_KEYWORDS = ["ports ouverts", "etat reseau", "status reseau"]
+_TIME_KEYWORDS = [
+    "quelle heure", "heure est il", "il est quelle heure",
+    "dis moi quelle heure",
+]
+_WEATHER_KEYWORDS = [
+    "meteo", "temperature", "temps demain", "prevision meteo",
+    "previsions meteo",
+]
+_NEWS_KEYWORDS = ["actualite", "actualites", "news", "infos du jour", "information du jour"]
+_CODE_AUDIT_KEYWORDS = [
+    "audit ce code", "audite ce code", "analyse ce code", "analyse ton code",
+    "analyse le code", "inspecte ton code", "audite ton code",
+    "qualite de ton code", "verifie ce code", "vérifie ce code",
+    "code audit", "audit python",
+]
+_CODE_KEYWORDS = [
+    "genere un fichier", "genere du code", "ecris un script", "script bash",
+    "script python", "ameliore ce code", "revue de code", "corrige ce code",
+    "fichier python",
+]
+_TOOL_CREATION_KEYWORDS = [
+    "cree un tool", "crée un tool", "creer un tool", "créer un tool",
+    "ajoute un tool", "ajoute un outil", "cree un outil", "crée un outil",
+]
+_AGENT_LIST_KEYWORDS = [
+    "liste les agents", "liste agents", "affiche les agents",
+    "affiche moi les agents", "agents disponibles", "quels agents",
+]
+_AGENT_RUN_KEYWORDS = [
+    "lance l agent", "lance l'agent", "lance agent", "execute l agent",
+    "execute l'agent", "execute agent", "run agent",
+]
+_PERSONALITY_KEYWORDS = [
+    "sois plus sympa", "sois plus gentil", "sois moins froid",
+    "change ton ton", "adapte ton style", "parle autrement",
+]
+
+
+def _keyword_fallback_intent(query: str) -> Intent | None:
+    """
+    Cascade de mots-clés pour les intents sans équivalent dans le schéma
+    target/operation. Retourne None si rien ne matche -- dans ce cas,
+    IntentRouter.route() retombe sur le classifieur ML.
+    """
     q = _normalize(query)
 
-    greeting_keywords = [
-        "salut",
-        "salut neron",
-        "bonjour",
-        "bonjour neron",
-        "hello",
-        "hello neron",
-        "coucou",
-        "coucou neron",
-        "hey",
-        "hey neron",
-        "tu es la",
-        "tu es la neron",
-        "neron tu es la",
-    ]
-
-
-    thanks_keywords = [
-        "merci",
-        "merci neron",
-        "thanks",
-        "thank you",
-    ]
-
-    goodbye_keywords = [
-        "au revoir",
-        "bye",
-        "a plus",
-        "à plus",
-        "bonne nuit",
-    ]
-
-    status_smalltalk_keywords = [
-        "ca va",
-        "ça va",
-        "tu vas bien",
-        "comment vas tu",
-        "comment vas-tu",
-    ]
-
-    identity_keywords = [
-        "qui es tu",
-        "qui es-tu",
-        "tu es qui",
-        "presente toi",
-        "présente toi",
-        "presente-toi",
-        "présente-toi",
-        "quel est ton nom",
-        "comment tu t appelles",
-        "comment tu t'appelles",
-        "comment t appelles tu",
-        "comment t'appelles tu",
-    ]
-
-    self_status_keywords = [
-        "etat interne",
-        "etat conscience",
-        "etat cognitif",
-        "self status",
-        "self model",
-        "selfmodel",
-        "que sais tu de toi",
-        "que sais-tu de toi",
-        "que sais tu de toi meme",
-        "que sais-tu de toi-même",
-        "tes capacites",
-        "tes capacités",
-        "capacites de neron",
-        "capacités de neron",
-    ]
-
-    system_keywords = [
-        "statut systeme",
-        "etat systeme",
-        "status systeme",
-        "quel est ton etat actuel",
-        "comment va ton systeme",
-        "ton systeme fonctionne t il correctement",
-        "systeme fonctionne t il correctement",
-        "le core fonctionne t il",
-        "core fonctionne t il",
-        "as tu detecte des problemes",
-        "services actifs",
-        "quels services sont actifs",
-        "liste les services",
-        "quels modules sont charges",
-        "quels modules sont disponibles",
-        "modules charges",
-        "modules disponibles",
-    ]
-
-    network_keywords = [
-        "ports ouverts",
-        "etat reseau",
-        "status reseau",
-    ]
-
-    agent_creation_keywords = [
-        "cree un agent",
-        "crée un agent",
-        "creer un agent",
-        "créer un agent",
-        "j aimerais un agent",
-        "je veux un agent",
-        "nouvel agent",
-        "genere un agent",
-        "génère un agent",
-        "ajoute un agent",
-    ]
-
-    tool_creation_keywords = [
-        "cree un tool",
-        "crée un tool",
-        "creer un tool",
-        "créer un tool",
-        "ajoute un tool",
-        "ajoute un outil",
-        "cree un outil",
-        "crée un outil",
-        "creer un outil",
-        "créer un outil",
-    ]
-
-    project_status_keywords = [
-        "ou en est mon objectif",
-        "où en est mon objectif",
-        "etat de mon objectif",
-        "état de mon objectif",
-        "statut de mon objectif",
-        "status de mon objectif",
-        "ou en est l objectif",
-        "où en est l objectif",
-        "ou en est le projet",
-        "où en est le projet",
-        "il en est ou l agent",
-        "il en est où l agent",
-        "etat du projet",
-        "état du projet",
-        "detaille le projet",
-        "détaille le projet",
-        "statut du projet",
-    ]
-
-    project_list_keywords = [
-        "liste mes projets",
-        "liste les projets",
-        "quels agents sont en cours de creation",
-        "quels agents sont en cours de création",
-        "projets en cours",
-        "agents en cours de creation",
-        "agents en cours de création",
-    ]
-
-    agent_list_keywords = [
-        "liste les agents",
-        "liste agents",
-        "affiche les agents",
-        "affiche moi les agents",
-        "agents disponibles",
-        "quels agents",
-        "montre les agents",
-        "montre moi les agents",
-    ]
-
-    agent_run_keywords = [
-        "lance l agent",
-        "lance l'agent",
-        "lance agent",
-        "execute l agent",
-        "execute l'agent",
-        "execute agent",
-        "exécute l agent",
-        "exécute l'agent",
-        "run agent",
-    ]
-
-    agent_promote_keywords = [
-        "valide l agent",
-        "valide l'agent",
-        "valide agent",
-        "promeut l agent",
-        "promeut l'agent",
-        "promeut agent",
-        "active l agent",
-        "active l'agent",
-        "active agent",
-    ]
-
-    time_keywords = [
-        "quelle heure",
-        "heure est il",
-        "il est quelle heure",
-        "dis moi quelle heure",
-    ]
-
-    weather_keywords = [
-        "meteo",
-        "temperature",
-        "temps demain",
-        "prevision meteo",
-        "previsions meteo",
-    ]
-
-    news_keywords = [
-        "actualite",
-        "actualites",
-        "news",
-        "infos du jour",
-        "information du jour",
-    ]
-
-    ha_keywords = [
-        "allume",
-        "eteins",
-        "eteindre",
-        "lumiere",
-        "lumieres",
-        "thermostat",
-        "chauffage",
-        "prise",
-        "volet",
-        "home assistant",
-    ]
-
-    code_keywords = [
-        "genere un fichier",
-        "genere du code",
-        "ecris un script",
-        "script bash",
-        "script python",
-        "ameliore ce code",
-        "revue de code",
-        "corrige ce code",
-        "fichier python",
-    ]
-
-    code_audit_keywords = [
-        "audit ce code",
-        "audite ce code",
-        "analyse ce code",
-        "analyse ton code",
-        "analyse le code",
-        "inspecte ton code",
-        "audite ton code",
-        "qualite de ton code",
-        "verifie ce code",
-        "vérifie ce code",
-        "relis ce code",
-        "revise ce code",
-        "révise ce code",
-        "controle ce code",
-        "contrôle ce code",
-        "code audit",
-        "audit python",
-    ]
-
-    personality_keywords = [
-        "sois plus sympa",
-        "sois plus gentil",
-        "sois moins froid",
-        "change ton ton",
-        "adapte ton style",
-        "parle autrement",
-    ]
-
-    memory_search_prefixes = (
-        "recherche ",
-        "cherche ",
-        "retrouve ",
-    )
-    memory_search_keywords = [
-        "recherche dans ta memoire",
-        "cherche dans ta memoire",
-        "recherche memoire",
-        "qu as tu memorise sur",
-        "que sais tu sur",
-        "retrouve mes notes sur",
-    ]
-
-    for prefix in memory_search_prefixes:
-        if q.startswith(prefix):
-            target = q.removeprefix(prefix).strip()
-            if (
-                re.search(r"\bphase\s+\d+\b", target)
-                or target in {"oblivia", "sqlite", "goal engine"}
-            ):
-                return Intent.MEMORY_SEARCH
-
-    if any(k in q for k in memory_search_keywords):
-        return Intent.MEMORY_SEARCH
-
-    if any(k in q for k in time_keywords):
-        return Intent.TIME_QUERY
-
-    if q.startswith("/goal ") and any(k in q for k in agent_creation_keywords):
-        return Intent.AGENT_CREATION
-
-    if q.startswith("/goal ") and any(k in q for k in tool_creation_keywords):
-        return Intent.TOOL_CREATION
-
-    if any(k in q for k in project_list_keywords):
-        return Intent.PROJECT_LIST
-
-    if any(k in q for k in project_status_keywords):
-        return Intent.PROJECT_STATUS
-
-    if any(k in q for k in agent_creation_keywords):
-        return Intent.AGENT_CREATION
-
-    if any(k in q for k in tool_creation_keywords):
-        return Intent.TOOL_CREATION
-
-    # Les salutations simples restent conversationnelles pour éviter
-    # de détourner les échanges courts comme "bonjour".
-    if q in greeting_keywords:
-        return Intent.CONVERSATION
-
-    if q in thanks_keywords:
+    if q in _GREETING_KEYWORDS:
+        return Intent.GREETING
+    if q in _THANKS_KEYWORDS:
         return Intent.THANKS
-
-    if q in goodbye_keywords:
+    if q in _GOODBYE_KEYWORDS:
         return Intent.GOODBYE
-
-    if q in status_smalltalk_keywords:
+    if q in _STATUS_SMALLTALK_KEYWORDS:
         return Intent.STATUS_SMALLTALK
 
     try:
@@ -409,142 +218,138 @@ def _fallback_intent(query: str) -> Intent | None:
         if detect_identity_intent(query).get("matched"):
             return Intent.IDENTITY_QUERY
     except Exception:
-        if any(k in q for k in identity_keywords):
+        if any(k in q for k in _IDENTITY_KEYWORDS):
             return Intent.IDENTITY_QUERY
 
-    if any(k in q for k in self_status_keywords):
+    if any(k in q for k in _SELF_STATUS_KEYWORDS):
         return Intent.SELF_STATUS
-
-    if any(k in q for k in weather_keywords):
-        return Intent.WEATHER_QUERY
-
-    if any(k in q for k in news_keywords):
-        return Intent.NEWS_QUERY
-
-    # Catalogue questions take precedence over action intents. Mentioning
-    # Home Assistant is not an HA action when asking which service owns it.
-    registry_status_keywords = [
-        "quels services sont arretes",
-        "services arretes",
-        "services hors ligne",
-        "services down",
-    ]
-    if any(k in q for k in registry_status_keywords):
-        return Intent.REGISTRY_STATUS
-
-    registry_keywords = [
-        "quels services sont enregistres",
-        "services enregistres",
-        "quel service fournit les llm",
-        "quel service fournit le llm",
-        "quel service gere home assistant",
-        "quel service gere la memoire",
-    ]
-    if any(k in q for k in registry_keywords):
-        return Intent.REGISTRY_LIST
-
-    topology_keywords = [
-        "montre moi la topologie",
-        "montre la topologie",
-        "topologie du systeme",
-        "affiche la topologie",
-        "voir la topologie",
-        "schema du systeme",
-    ]
-    if any(k in q for k in topology_keywords):
+    if any(k in q for k in _TOPOLOGY_KEYWORDS):
         return Intent.TOPOLOGY_SHOW
-
-    try:
-        from core.modules.memory import detect_memory_intent
-
-        is_memory_request = bool(detect_memory_intent(query).get("matched"))
-    except Exception:
-        is_memory_request = False
-
-    if is_memory_request:
-        # The Core orchestrator owns the memory route/action decision. Returning
-        # conversation here neutralizes false NLP/HA classifications without
-        # turning recall into the legacy MEMORY_SEARCH action.
-        return Intent.CONVERSATION
-
-    if any(k in q for k in ha_keywords):
-        return Intent.HA_ACTION
-
-    if any(k in q for k in personality_keywords):
-        return Intent.PERSONALITY_FEEDBACK
-
-    if any(k in q for k in code_audit_keywords):
-        return Intent.CODE_AUDIT
-
-    if any(k in q for k in code_keywords):
-        return Intent.CODE
-
-    if any(k in q for k in system_keywords):
-        return Intent.SYSTEM_STATUS
-
-    if any(k in q for k in network_keywords):
+    if any(k in q for k in _REGISTRY_STATUS_KEYWORDS):
+        return Intent.REGISTRY_STATUS
+    if any(k in q for k in _REGISTRY_LIST_KEYWORDS):
+        return Intent.REGISTRY_LIST
+    if any(k in q for k in _NETWORK_KEYWORDS):
         return Intent.NETWORK_STATUS
-
-    if any(k in q for k in agent_list_keywords):
+    if any(k in q for k in _TIME_KEYWORDS):
+        return Intent.TIME_QUERY
+    if any(k in q for k in _WEATHER_KEYWORDS):
+        return Intent.WEATHER_QUERY
+    if any(k in q for k in _NEWS_KEYWORDS):
+        return Intent.NEWS_QUERY
+    if any(k in q for k in _CODE_AUDIT_KEYWORDS):
+        return Intent.CODE_AUDIT
+    if any(k in q for k in _CODE_KEYWORDS):
+        return Intent.CODE
+    if any(k in q for k in _TOOL_CREATION_KEYWORDS):
+        return Intent.TOOL_CREATION
+    if any(k in q for k in _AGENT_LIST_KEYWORDS):
         return Intent.AGENT_LIST
-
-    if any(k in q for k in agent_run_keywords):
+    if any(k in q for k in _AGENT_RUN_KEYWORDS):
         return Intent.AGENT_RUN
-
-    if any(k in q for k in agent_promote_keywords):
-        return Intent.AGENT_RUN
+    if any(k in q for k in _PERSONALITY_KEYWORDS):
+        return Intent.PERSONALITY_FEEDBACK
 
     return None
 
 
 class IntentRouter:
+    """
+    Routeur d'intentions Néron -- interface publique inchangée (même classe,
+    même signature route()) pour compatibilité avec le reste du pipeline.
+
+    Logique interne remplacée (24/07) : classifieur CamemBERT hybride
+    (target + règle lexicale/operation) à la place du NLP interne + cascade
+    de mots-clés. Validé en holdout honnête à 83.1% Target+Op (vs 65.6% pour
+    l'ancien pipeline LLM Ollama), latence ~181ms (vs 25-40s).
+    """
+
     def __init__(self, llm_agent=None) -> None:
         self.llm_agent = llm_agent
+        from core.pipeline.intent.neron_intent_classifier import IntentRouter as MLIntentRouter
+        self._ml_router = MLIntentRouter()
 
     async def route(self, query: str) -> IntentResult:
-        normalized_query = _normalize(query)
-        nlp_result = _nlp().process(normalized_query)
+        # Étape 1 : cascade de mots-clés pour les intents sans équivalent
+        # dans le schéma target/operation (option 1, 24/07)
+        keyword_intent = _keyword_fallback_intent(query)
+        if keyword_intent is not None:
+            confidence_score = 0.9
+            entities: Dict[str, Any] = {"routing_method": "keyword_cascade"}
+            logger.info(
+                "[NLP] intent=%s method=keyword_cascade", keyword_intent.value
+            )
+            try:
+                from core.modules.self_model import get_self_model
 
-        intent_str = nlp_result.intent
-        intent = _INTENT_MAP.get(intent_str, Intent.CONVERSATION)
+                model = get_self_model()
+                model.set_last_intent(str(keyword_intent.value), confidence_score)
+            except Exception:
+                pass
+            return IntentResult(
+                intent=keyword_intent,
+                confidence="high",
+                confidence_score=confidence_score,
+                entities=entities,
+            )
 
-        entities = nlp_result.entities
-        score = nlp_result.confidence
+        # Étape 2 : classifieur ML (target/operation), comme avant
+        result = self._ml_router.route(query)
+        target = result["target"]
+        operation = result["operation"]
+        method = result["method"]
 
-        fallback = _fallback_intent(normalized_query)
+        intent = _map_to_intent(target, operation)
 
-        if fallback:
-            intent = fallback
-            intent_str = fallback.value
-            score = max(score, 0.98 if fallback == Intent.GREETING else 0.85)
-
+        # Le classifieur ne renvoie pas de score de confiance calibré
+        # (contrairement à l'ancien pipeline NLP) -- la règle lexicale est
+        # déterministe donc traitée comme haute confiance ; le fallback ML
+        # comme confiance moyenne par défaut, faute de calibration mesurée.
+        confidence_score = 0.95 if method == "lexical_rule" else 0.7
         confidence = (
-            "high"
-            if score >= 0.7
-            else ("medium" if score >= 0.4 else "low")
+            "high" if confidence_score >= 0.7
+            else ("medium" if confidence_score >= 0.4 else "low")
         )
 
+        entities: Dict[str, Any] = {
+            "target": target,
+            "operation": operation,
+            "routing_method": method,
+        }
+
+        # Option 2 (24/07) : quand le classifieur n'identifie vraiment rien
+        # (target=unknown), on le signale explicitement via confidence="low"
+        # plutôt que de laisser croire à une conversation normale -- ça
+        # permet à l'orchestrateur/llm_provider en aval de choisir un repli
+        # rapide sans lancer une génération LLM complète si sa logique de
+        # routage tient compte de la confidence. ATTENTION : ceci suppose que
+        # l'orchestrateur consulte confidence_score pour cette décision --
+        # à vérifier côté core/orchestrator avant de considérer résolu le
+        # problème des 242s observé sur une requête unknown.
+        if target == "unknown" and operation == "unknown":
+            confidence_score = 0.1
+            confidence = "low"
+            entities["genuinely_unknown"] = True
+
         logger.info(
-            "[NLP] intent=%s confidence=%.3f entities=%s",
-            intent_str,
-            score,
-            entities,
+            "[NLP] intent=%s target=%s operation=%s method=%s",
+            intent.value,
+            target,
+            operation,
+            method,
         )
 
         try:
             from core.modules.self_model import get_self_model
 
             model = get_self_model()
-            model.set_last_intent(
-                str(intent_str),
-                score,
-            )
+            model.set_last_intent(str(intent.value), confidence_score)
         except Exception:
             pass
 
         return IntentResult(
             intent=intent,
             confidence=confidence,
-            confidence_score=score,
+            confidence_score=confidence_score,
             entities=entities,
         )

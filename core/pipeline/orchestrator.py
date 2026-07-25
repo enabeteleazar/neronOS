@@ -356,6 +356,14 @@ class CoreOrchestrator:
                 complexity=complexity,
                 requires_tool=True,
             )
+        elif intent_result.entities.get("genuinely_unknown"):
+            decision = OrchestratorDecision(
+                intent=Intent.CONVERSATION.value,
+                selected_route="no_match_provider",
+                reason="Classifieur n'a identifie aucune intention (target=unknown) -- repli rapide sans appel LLM pour eviter un timeout inutile.",
+                complexity=complexity,
+                requires_llm=False,
+            )
         else:
             decision = OrchestratorDecision(
                 intent=intent.value,
@@ -705,6 +713,20 @@ class CoreOrchestrator:
         if route == "topology_provider":
             self._log_used("topology_used", decision)
             return await self._execute_topology(query, decision)
+
+        if route == "no_match_provider":
+            self._log_used("no_match_used", decision)
+            return (
+                "Je n'ai pas bien compris votre demande, pouvez-vous reformuler ?",
+                "no_match_provider",
+                {
+                    "selected_route": "no_match_provider",
+                    "executor": "no_match_provider",
+                    "fallback_used": False,
+                    "retries": 0,
+                    "llm_used": False,
+                },
+            )
 
         if route == "llm_provider":
             self._log_used("llm_provider_used", decision)
