@@ -1,26 +1,89 @@
 """
-Provider Wikipédia pour le Kernel Néron.
+Provider Wikipedia pour le Kernel Neron.
 
-Type "knowledge" (déjà présent dans ProviderType). Implémente ProviderProtocol
-pour s'enregistrer dans provider_registry aux côtés du provider mémoire.
+Type "generic" (le type "knowledge" etant deja pris par ObsidianKnowledgeProvider).
+Implemente ProviderProtocol pour s'enregistrer dans provider_registry.
 
-Action supportée : "search" — payload {"query": <nom ou sujet>}.
+Action supportee : "search" -- payload {"query": <nom ou sujet>}.
+
+Note technique : utilise `requests` (synchrone, execute via asyncio.to_thread)
+plutot que `httpx`. Wikipedia bloque les requetes httpx/httpcore avec un 403
+"robot policy" independamment du User-Agent (fingerprint TLS bas niveau),
+confirme par test isole -- requests passe sans probleme avec les memes
+en-tetes et URL.
 """
 
 from __future__ import annotations
 
-import httpx
+import asyncio
+
+import requests
 
 from .models import ProviderRequest, ProviderResponse, ProviderStatus, ProviderType
 
 _SEARCH_URL = "https://fr.wikipedia.org/w/api.php"
 _SUMMARY_URL = "https://fr.wikipedia.org/api/rest_v1/page/summary/{title}"
 _USER_AGENT = "NeronOS/1.0 (identity-lookup provider; contact: homebox)"
-_TIMEOUT = httpx.Timeout(5.0, connect=3.0)
+_TIMEOUT = 5.0
+
+
+def _sync_search(query: str) -> dict:
+    headers = {"User-Agent": _USER_AGENT}
+    search_resp = requests.get(
+        _SEARCH_URL,
+        params={
+            "action": "query",
+            "list": "search",
+            "srsearch": query,
+            "srlimit": 5,
+            "format": "json",
+        },
+        headers=headers,
+        timeout=_TIMEOUT,
+    )
+    search_resp.raise_for_status()
+    search_hits = search_resp.json().get("query", {}).get("search", [])
+
+    if not search_hits:
+        return {
+            "found": False,
+            "title": None,
+            "summary": None,
+            "url": None,
+            "candidate_count": 0,
+        }
+
+    top_title = search_hits[0]["title"]
+    summary_resp = requests.get(
+        _SUMMARY_URL.format(title=top_title.replace(" ", "_")),
+        headers=headers,
+        timeout=_TIMEOUT,
+    )
+    summary_resp.raise_for_status()
+    summary_data = summary_resp.json()
+
+    return {
+        "found": True,
+        "title": summary_data.get("title", top_title),
+        "summary": summary_data.get("extract"),
+        "url": summary_data.get("content_urls", {}).get("desktop", {}).get("page"),
+        "candidate_count": len(search_hits),
+    }
+
+
+def _sync_health() -> None:
+    headers = {"User-Agent": _USER_AGENT}
+    resp = requests.get(
+        _SEARCH_URL,
+        params={"action": "query", "meta": "siteinfo", "format": "json"},
+        headers=headers,
+        timeout=_TIMEOUT,
+    )
+    resp.raise_for_status()
 
 
 class WikipediaProvider:
-    """Provider de recherche d'identité via l'API REST Wikipédia (fr)."""
+    """Provider de recherche d'identite via l'API Wikipedia (fr), sur `requests`."""
 
     def __init__(self) -> None:
         self._status: ProviderStatus = "unknown"
@@ -43,18 +106,12 @@ class WikipediaProvider:
 
     async def health(self) -> ProviderResponse:
         try:
-            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-                response = await client.get(
-                    _SEARCH_URL,
-                    params={"action": "query", "meta": "siteinfo", "format": "json"},
-                    headers={"User-Agent": _USER_AGENT},
-                )
-                response.raise_for_status()
+            await asyncio.to_thread(_sync_health)
             self._status = "healthy"
             return ProviderResponse(
                 provider=self.name, action="health", status="healthy", result={"ok": True}
             )
-        except httpx.HTTPError as exc:
+        except requests.RequestException as exc:
             self._status = "unhealthy"
             return ProviderResponse(
                 provider=self.name, action="health", status="unhealthy", error=str(exc)
@@ -81,58 +138,16 @@ class WikipediaProvider:
             )
 
         try:
-            async with httpx.AsyncClient(timeout=_TIMEOUT, headers={"User-Agent": _USER_AGENT}) as client:
-                search_response = await client.get(
-                    _SEARCH_URL,
-                    params={
-                        "action": "query",
-                        "list": "search",
-                        "srsearch": query,
-                        "srlimit": 5,
-                        "format": "json",
-                    },
-                )
-                search_response.raise_for_status()
-                search_hits = search_response.json().get("query", {}).get("search", [])
-
-                if not search_hits:
-                    self._status = "healthy"
-                    return ProviderResponse(
-                        provider=self.name,
-                        action=request.action,
-                        status="healthy",
-                        result={
-                            "found": False,
-                            "title": None,
-                            "summary": None,
-                            "url": None,
-                            "candidate_count": 0,
-                        },
-                        trace_id=request.trace_id,
-                    )
-
-                top_title = search_hits[0]["title"]
-                summary_response = await client.get(
-                    _SUMMARY_URL.format(title=top_title.replace(" ", "_"))
-                )
-                summary_response.raise_for_status()
-                summary_data = summary_response.json()
-
+            result = await asyncio.to_thread(_sync_search, query)
             self._status = "healthy"
             return ProviderResponse(
                 provider=self.name,
                 action=request.action,
                 status="healthy",
-                result={
-                    "found": True,
-                    "title": summary_data.get("title", top_title),
-                    "summary": summary_data.get("extract"),
-                    "url": summary_data.get("content_urls", {}).get("desktop", {}).get("page"),
-                    "candidate_count": len(search_hits),
-                },
+                result=result,
                 trace_id=request.trace_id,
             )
-        except httpx.HTTPError as exc:
+        except requests.RequestException as exc:
             self._status = "degraded"
             return ProviderResponse(
                 provider=self.name,

@@ -37,6 +37,38 @@ def _result_items(result: Any) -> list[dict[str, Any]]:
     return value if isinstance(value, list) else []
 
 
+async def _knowledge_fallback(query: str) -> str | None:
+    """Cascade vers le provider générique (Wikipédia) si la mémoire est vide.
+
+    Retourne None si aucun provider "generic" n'est enregistré, si la
+    recherche échoue, ou si rien n'est trouvé — dans tous ces cas
+    l'appelant retombe sur le message de fallback mémoire habituel.
+    """
+    providers = provider_registry.by_type("generic")
+    provider_info = providers[0] if providers else None
+    if provider_info is None:
+        return None
+
+    response = await provider_registry.execute_via_a2a(
+        provider_info.name,
+        ProviderRequest(action="search", payload={"query": query}),
+    )
+    if response.error or not isinstance(response.result, dict):
+        return None
+
+    result = response.result
+    if not result.get("found"):
+        return None
+
+    summary = result.get("summary")
+    url = result.get("url")
+    if not summary:
+        return None
+    if url:
+        return f"Selon Wikipédia : {summary} ({url})"
+    return f"Selon Wikipédia : {summary}"
+
+
 async def build_memory_response_async(
     kind: str,
     text: str,
@@ -76,6 +108,7 @@ async def build_memory_response_async(
     result = response.result if isinstance(response.result, dict) else {}
     items = _result_items(response.result)
     answer = result.get("answer")
+    print(f">>> DEBUG result={result!r} answer={answer!r} items={items!r}", flush=True)
 
     if response.error:
         rendered = f"Erreur du provider mémoire : {response.error}"
@@ -99,7 +132,8 @@ async def build_memory_response_async(
             for item in items[:3]
         )
     else:
-        rendered = "Je n'ai pas encore de souvenir correspondant à cette question."
+        fallback = await _knowledge_fallback(payload.get("query") or normalize(text))
+        rendered = fallback or "Je n'ai pas encore de souvenir correspondant à cette question."
 
     return {
         "response": rendered,

@@ -23,6 +23,7 @@ from core.modules.status import (
     detect_status_intent,
 )
 from core.modules.memory import detect_memory_intent, build_memory_response_async
+from core.modules.memory.service import _knowledge_fallback
 from core.modules.knowledge import build_knowledge_response_async, detect_knowledge_intent
 from core.infrastructure.registry import service_registry
 from core.infrastructure.topology import build_topology
@@ -1019,6 +1020,15 @@ class CoreOrchestrator:
             )
 
         if not results:
+            knowledge_answer = await _knowledge_fallback(memory_query)
+            if knowledge_answer:
+                metadata["fallback_used"] = True
+                metadata["fallback_source"] = "generic_provider"
+                return (
+                    knowledge_answer,
+                    provider.name,
+                    metadata,
+                )
             return (
                 f"Je n’ai trouvé aucun souvenir correspondant à « {memory_query} ».",
                 provider.name,
