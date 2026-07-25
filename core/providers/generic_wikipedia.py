@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 
 import requests
+import re
 
 from .models import ProviderRequest, ProviderResponse, ProviderStatus, ProviderType
 
@@ -53,7 +54,29 @@ def _sync_search(query: str) -> dict:
             "candidate_count": 0,
         }
 
-    top_title = search_hits[0]["title"]
+    def _significant_words(text: str) -> set[str]:
+        stopwords = {"qui", "est", "le", "la", "les", "un", "une", "des", "de", "du"}
+        words = re.findall(r"\w+", text.lower())
+        return {w for w in words if len(w) > 2 and w not in stopwords}
+
+    query_words = _significant_words(query)
+    top_hit = None
+    for hit in search_hits:
+        title_words = _significant_words(hit["title"])
+        if query_words & title_words:
+            top_hit = hit
+            break
+
+    if top_hit is None:
+        return {
+            "found": False,
+            "title": None,
+            "summary": None,
+            "url": None,
+            "candidate_count": len(search_hits),
+        }
+
+    top_title = top_hit["title"]
     summary_resp = requests.get(
         _SUMMARY_URL.format(title=top_title.replace(" ", "_")),
         headers=headers,
