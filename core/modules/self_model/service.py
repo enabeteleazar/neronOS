@@ -26,6 +26,7 @@ from core.modules.self_model.goals_snapshot import (
     _safe_registered_services,
     _safe_task_state,
 )
+from core.modules.self_model.homelab import homelab_snapshot
 from core.modules.self_model.runtime_snapshot import (
     _runtime_from_status,
     _services_from_status,
@@ -141,6 +142,7 @@ def build_self_model_snapshot() -> dict[str, Any]:
         "generated_at": _now_iso(),
         "runtime": runtime,
         "services": services,
+        "homelab": homelab_snapshot(),
         "health": {
             "realtime": status.get("global_status", "unknown"),
             "historical": "unknown",

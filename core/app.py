@@ -124,6 +124,7 @@ _CORE_ROUTER_SPECS = [
     ("knowledge", "core.modules.knowledge.router", True),
 ]
 _OPTIONAL_ROUTER_SPECS = [
+    ("self_model_write", "core.api.self_model_write_routes", True),
     ("runtime_governor", "core.api.runtime_governor_routes", True),
     ("world_model", "core.api.world_model_routes", True),
     ("task", "core.api.task_routes", False),
@@ -700,6 +701,7 @@ _INTERNAL_AUTH = [Depends(verify_api_key)]
 
 for router, kwargs in [
     (globals().get("self_model_router"), {"dependencies": _INTERNAL_AUTH}),
+    (globals().get("self_model_write_router"), {"dependencies": _INTERNAL_AUTH}),
     (globals().get("selfmodel_router"), {"dependencies": _INTERNAL_AUTH}),
     (globals().get("runtime_governor_router"), {"dependencies": _INTERNAL_AUTH}),
     (globals().get("world_model_router"), {"dependencies": _INTERNAL_AUTH}),
