@@ -27,7 +27,7 @@ from core.modules.status import (
 from core.modules.memory import detect_memory_intent, build_memory_response_async
 from core.modules.memory.service import _knowledge_fallback
 from core.gateway.gateway import get_gateway
-from core.providers.generic_web import instagram_broadcast
+from core.providers.generic_network import instagram_broadcast
 from core.providers.registry import provider_registry as _wp_registry
 from core.providers.models import ProviderRequest as _WebProviderRequest
 from core.modules.knowledge import build_knowledge_response_async, detect_knowledge_intent

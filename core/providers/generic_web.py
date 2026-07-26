@@ -1,9 +1,9 @@
 """
-Provider recherche web (DuckDuckGo HTML, sans cle API) pour le Kernel Neron.
+Provider recherche web generique (DuckDuckGo HTML, sans cle API) pour le Kernel Neron.
 
 Type "web" (deja reserve dans ProviderType). Implemente ProviderProtocol.
-Derniere etape de la cascade identite : appele seulement si memoire ET
-Wikipedia n'ont rien donne.
+Etape de la cascade identite : appele seulement si memoire ET Wikipedia
+n'ont rien donne.
 
 Action supportee : "search" -- payload {"query": <texte>}.
 
@@ -11,6 +11,12 @@ Note : scraping HTML non-officiel (html.duckduckgo.com/html/), pas d'API
 documentee -- peut casser si DuckDuckGo change sa structure de page.
 Utilise `requests` (pas httpx, lecon du provider Wikipedia -- fingerprint
 TLS bloque par certains sites selon la librairie).
+
+Les recherches reseaux sociaux/YouTube (Instagram, X, Facebook, YouTube)
+vivent dans `generic_network.py`, pas ici -- ce fichier reste dedie a la
+recherche web generique. `_sync_search_site` est neanmoins definie ici et
+reutilisee par `generic_network.py` (utilitaire de recherche restreinte
+par domaine, partage entre les deux).
 """
 
 from __future__ import annotations
@@ -38,7 +44,8 @@ def _sync_search_site(query: str, site: str) -> dict:
     """Recherche restreinte a un domaine precis (site:xxx.com) via DuckDuckGo.
 
     Utilisee pour trouver l'URL probable d'un profil sur un reseau social
-    donne, sans jamais appeler l'API du reseau lui-meme.
+    donne, sans jamais appeler l'API du reseau lui-meme. Partagee avec
+    generic_network.py.
     """
     headers = {"User-Agent": _USER_AGENT}
     resp = requests.post(
@@ -209,119 +216,3 @@ class WebProvider:
 
 
 web_provider = WebProvider()
-
-
-async def instagram_broadcast(query: str) -> None:
-    """Cherche un profil Instagram et ouvre une fenetre Dashboard si trouve.
-
-    Taches de fond, independante de la cascade memoire->Wikipedia->web :
-    ne renvoie rien, ne modifie jamais la reponse du chat.
-
-    Import de get_gateway differe (a l'interieur de la fonction) pour
-    eviter un import circulaire : core.gateway.gateway -> internal_gateway
-    -> orchestrator -> core.modules.memory -> core.providers -> ce fichier.
-    """
-    from core.gateway.gateway import get_gateway
-
-    try:
-        result = await asyncio.to_thread(_sync_search_site, query, "instagram.com")
-    except requests.RequestException as exc:
-        return
-
-    if not result.get("found"):
-        return
-
-    gw = get_gateway()
-    if gw is None:
-        return
-
-    await gw.broadcast({
-        "event": "memory.wikipedia_fallback",
-        "data": {
-            "source": "instagram",
-            "query": query,
-            "title": result.get("title"),
-            "url": result.get("url"),
-            "summary": None,
-            "image_url": None,
-        },
-    })
-
-    handle = result.get("url", "").rstrip("/").rsplit("/", 1)[-1]
-    if handle:
-        try:
-            x_resp = await asyncio.to_thread(
-                requests.get,
-                f"https://x.com/{handle}",
-                headers={"User-Agent": _USER_AGENT},
-                timeout=_TIMEOUT,
-            )
-            title_start = x_resp.text.find("<title>")
-            title_end = x_resp.text.find("</title>")
-            x_title = (
-                x_resp.text[title_start + 7:title_end]
-                if title_start != -1 and title_end != -1
-                else ""
-            )
-            if x_resp.status_code == 200 and "/ X" in x_title and "@" in x_title:
-                await gw.broadcast({
-                    "event": "memory.wikipedia_fallback",
-                    "data": {
-                        "source": "x",
-                        "query": query,
-                        "title": x_title,
-                        "url": f"https://x.com/{handle}",
-                        "summary": None,
-                        "image_url": None,
-                    },
-                })
-        except requests.RequestException:
-            pass
-
-    if handle:
-        try:
-            fb_resp = await asyncio.to_thread(
-                requests.get,
-                f"https://www.facebook.com/{handle}",
-                headers={"User-Agent": _USER_AGENT},
-                timeout=_TIMEOUT,
-            )
-            title_start = fb_resp.text.find("<title>")
-            title_end = fb_resp.text.find("</title>")
-            fb_title = (
-                fb_resp.text[title_start + 7:title_end]
-                if title_start != -1 and title_end != -1
-                else ""
-            )
-            if fb_resp.status_code == 200 and fb_title and "facebook" not in fb_title.lower():
-                await gw.broadcast({
-                    "event": "memory.wikipedia_fallback",
-                    "data": {
-                        "source": "facebook",
-                        "query": query,
-                        "title": fb_title,
-                        "url": f"https://www.facebook.com/{handle}",
-                        "summary": None,
-                        "image_url": None,
-                    },
-                })
-        except requests.RequestException:
-            pass
-
-    try:
-        yt_result = await asyncio.to_thread(_sync_search_site, query, "youtube.com")
-    except requests.RequestException:
-        yt_result = None
-
-    if yt_result and yt_result.get("found"):
-        await gw.broadcast({
-            "event": "memory.wikipedia_fallback",
-            "data": {
-                "source": "youtube",
-                "query": query,
-                "title": yt_result.get("title"),
-                "url": yt_result.get("url"),
-                "summary": None,
-                "image_url": None,
-            },
-        })
