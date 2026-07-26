@@ -34,6 +34,40 @@ def _significant_words(text: str) -> set[str]:
     return {w for w in words if len(w) > 2 and w not in _STOPWORDS}
 
 
+def _sync_search_site(query: str, site: str) -> dict:
+    """Recherche restreinte a un domaine precis (site:xxx.com) via DuckDuckGo.
+
+    Utilisee pour trouver l'URL probable d'un profil sur un reseau social
+    donne, sans jamais appeler l'API du reseau lui-meme.
+    """
+    headers = {"User-Agent": _USER_AGENT}
+    resp = requests.post(
+        _SEARCH_URL,
+        data={"q": f"site:{site} {query}", "kl": "fr-fr"},
+        headers=headers,
+        timeout=_TIMEOUT,
+    )
+    resp.raise_for_status()
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    results = soup.select("div.result")
+
+    query_words = _significant_words(query)
+    for result in results:
+        title_el = result.select_one("a.result__a")
+        if title_el is None:
+            continue
+        title = title_el.get_text(strip=True)
+        url = title_el.get("href") or ""
+        if site not in url:
+            continue
+        if not (query_words & _significant_words(title)):
+            continue
+        return {"found": True, "title": title, "url": url, "candidate_count": len(results)}
+
+    return {"found": False, "title": None, "url": None, "candidate_count": len(results)}
+
+
 def _sync_search(query: str) -> dict:
     headers = {"User-Agent": _USER_AGENT}
     resp = requests.post(
@@ -175,3 +209,119 @@ class WebProvider:
 
 
 web_provider = WebProvider()
+
+
+async def instagram_broadcast(query: str) -> None:
+    """Cherche un profil Instagram et ouvre une fenetre Dashboard si trouve.
+
+    Taches de fond, independante de la cascade memoire->Wikipedia->web :
+    ne renvoie rien, ne modifie jamais la reponse du chat.
+
+    Import de get_gateway differe (a l'interieur de la fonction) pour
+    eviter un import circulaire : core.gateway.gateway -> internal_gateway
+    -> orchestrator -> core.modules.memory -> core.providers -> ce fichier.
+    """
+    from core.gateway.gateway import get_gateway
+
+    try:
+        result = await asyncio.to_thread(_sync_search_site, query, "instagram.com")
+    except requests.RequestException as exc:
+        return
+
+    if not result.get("found"):
+        return
+
+    gw = get_gateway()
+    if gw is None:
+        return
+
+    await gw.broadcast({
+        "event": "memory.wikipedia_fallback",
+        "data": {
+            "source": "instagram",
+            "query": query,
+            "title": result.get("title"),
+            "url": result.get("url"),
+            "summary": None,
+            "image_url": None,
+        },
+    })
+
+    handle = result.get("url", "").rstrip("/").rsplit("/", 1)[-1]
+    if handle:
+        try:
+            x_resp = await asyncio.to_thread(
+                requests.get,
+                f"https://x.com/{handle}",
+                headers={"User-Agent": _USER_AGENT},
+                timeout=_TIMEOUT,
+            )
+            title_start = x_resp.text.find("<title>")
+            title_end = x_resp.text.find("</title>")
+            x_title = (
+                x_resp.text[title_start + 7:title_end]
+                if title_start != -1 and title_end != -1
+                else ""
+            )
+            if x_resp.status_code == 200 and "/ X" in x_title and "@" in x_title:
+                await gw.broadcast({
+                    "event": "memory.wikipedia_fallback",
+                    "data": {
+                        "source": "x",
+                        "query": query,
+                        "title": x_title,
+                        "url": f"https://x.com/{handle}",
+                        "summary": None,
+                        "image_url": None,
+                    },
+                })
+        except requests.RequestException:
+            pass
+
+    if handle:
+        try:
+            fb_resp = await asyncio.to_thread(
+                requests.get,
+                f"https://www.facebook.com/{handle}",
+                headers={"User-Agent": _USER_AGENT},
+                timeout=_TIMEOUT,
+            )
+            title_start = fb_resp.text.find("<title>")
+            title_end = fb_resp.text.find("</title>")
+            fb_title = (
+                fb_resp.text[title_start + 7:title_end]
+                if title_start != -1 and title_end != -1
+                else ""
+            )
+            if fb_resp.status_code == 200 and fb_title and "facebook" not in fb_title.lower():
+                await gw.broadcast({
+                    "event": "memory.wikipedia_fallback",
+                    "data": {
+                        "source": "facebook",
+                        "query": query,
+                        "title": fb_title,
+                        "url": f"https://www.facebook.com/{handle}",
+                        "summary": None,
+                        "image_url": None,
+                    },
+                })
+        except requests.RequestException:
+            pass
+
+    try:
+        yt_result = await asyncio.to_thread(_sync_search_site, query, "youtube.com")
+    except requests.RequestException:
+        yt_result = None
+
+    if yt_result and yt_result.get("found"):
+        await gw.broadcast({
+            "event": "memory.wikipedia_fallback",
+            "data": {
+                "source": "youtube",
+                "query": query,
+                "title": yt_result.get("title"),
+                "url": yt_result.get("url"),
+                "summary": None,
+                "image_url": None,
+            },
+        })

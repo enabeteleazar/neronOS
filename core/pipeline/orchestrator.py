@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import json
 import re
 import shlex
@@ -25,6 +27,7 @@ from core.modules.status import (
 from core.modules.memory import detect_memory_intent, build_memory_response_async
 from core.modules.memory.service import _knowledge_fallback
 from core.gateway.gateway import get_gateway
+from core.providers.generic_web import instagram_broadcast
 from core.providers.registry import provider_registry as _wp_registry
 from core.providers.models import ProviderRequest as _WebProviderRequest
 from core.modules.knowledge import build_knowledge_response_async, detect_knowledge_intent
@@ -1023,6 +1026,7 @@ class CoreOrchestrator:
             )
 
         if not results:
+            asyncio.create_task(instagram_broadcast(memory_query))
             knowledge_result = await _knowledge_fallback(memory_query)
             if knowledge_result:
                 metadata["fallback_used"] = True
@@ -1032,6 +1036,7 @@ class CoreOrchestrator:
                     await gw.broadcast({
                         "event": "memory.wikipedia_fallback",
                         "data": {
+                            "source": "wikipedia",
                             "query": memory_query,
                             "title": knowledge_result.get("title"),
                             "url": knowledge_result.get("url"),
@@ -1073,6 +1078,7 @@ class CoreOrchestrator:
                             await gw.broadcast({
                                 "event": "memory.wikipedia_fallback",
                                 "data": {
+                                    "source": "web",
                                     "query": memory_query,
                                     "title": web_result.get("title"),
                                     "url": url,
