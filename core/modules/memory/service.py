@@ -37,7 +37,7 @@ def _result_items(result: Any) -> list[dict[str, Any]]:
     return value if isinstance(value, list) else []
 
 
-async def _knowledge_fallback(query: str) -> str | None:
+async def _knowledge_fallback(query: str) -> dict[str, str | None] | None:
     """Cascade vers le provider générique (Wikipédia) si la mémoire est vide.
 
     Retourne None si aucun provider "generic" n'est enregistré, si la
@@ -62,11 +62,11 @@ async def _knowledge_fallback(query: str) -> str | None:
 
     summary = result.get("summary")
     url = result.get("url")
+    title = result.get("title")
     if not summary:
         return None
-    if url:
-        return f"Selon Wikipédia : {summary} ({url})"
-    return f"Selon Wikipédia : {summary}"
+    text = f"Selon Wikipédia : {summary} ({url})" if url else f"Selon Wikipédia : {summary}"
+    return {"text": text, "url": url, "title": title, "summary": summary}
 
 
 async def build_memory_response_async(

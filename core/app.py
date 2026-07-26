@@ -95,7 +95,7 @@ from core.pipeline.routing.agent_router import (
     LLMConfig,
     RouterToolBindings,
 )
-from core.gateway.gateway import GatewayConfig, NeronGateway
+from core.gateway.gateway import GatewayConfig, NeronGateway, set_gateway
 from core.runtime_compat import (
     CapabilityResolver,
     SessionStore,
@@ -566,6 +566,7 @@ async def lifespan(app: FastAPI):
                 tts_agent=tts_agent,
             )
 
+            set_gateway(_gw)
             _gateway_task = asyncio.create_task(_gw.start())
             logger.info("Gateway WebSocket demarre sur ws://0.0.0.0:18789")
 

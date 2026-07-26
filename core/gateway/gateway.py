@@ -838,3 +838,15 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+_gateway_instance: "NeronGateway | None" = None
+
+
+def get_gateway() -> "NeronGateway | None":
+    return _gateway_instance
+
+
+def set_gateway(gateway: "NeronGateway | None") -> None:
+    global _gateway_instance
+    _gateway_instance = gateway

@@ -24,6 +24,7 @@ from core.modules.status import (
 )
 from core.modules.memory import detect_memory_intent, build_memory_response_async
 from core.modules.memory.service import _knowledge_fallback
+from core.gateway.gateway import get_gateway
 from core.providers.registry import provider_registry as _wp_registry
 from core.providers.models import ProviderRequest as _WebProviderRequest
 from core.modules.knowledge import build_knowledge_response_async, detect_knowledge_intent
@@ -1022,12 +1023,23 @@ class CoreOrchestrator:
             )
 
         if not results:
-            knowledge_answer = await _knowledge_fallback(memory_query)
-            if knowledge_answer:
+            knowledge_result = await _knowledge_fallback(memory_query)
+            if knowledge_result:
                 metadata["fallback_used"] = True
                 metadata["fallback_source"] = "generic_provider"
+                gw = get_gateway()
+                if gw is not None:
+                    await gw.broadcast({
+                        "event": "memory.wikipedia_fallback",
+                        "data": {
+                            "query": memory_query,
+                            "title": knowledge_result.get("title"),
+                            "url": knowledge_result.get("url"),
+                            "summary": knowledge_result.get("summary"),
+                        },
+                    })
                 return (
-                    knowledge_answer,
+                    knowledge_result["text"],
                     provider.name,
                     metadata,
                 )
