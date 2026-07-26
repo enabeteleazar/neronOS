@@ -66,11 +66,23 @@ def _sync_search(query: str) -> dict:
         if len(snippet) < 40:
             continue
 
+        image_url = None
+        try:
+            page_resp = requests.get(url, headers=headers, timeout=_TIMEOUT)
+            page_resp.raise_for_status()
+            page_soup = BeautifulSoup(page_resp.text, "html.parser")
+            og_image = page_soup.select_one('meta[property="og:image"]')
+            if og_image and og_image.get("content"):
+                image_url = og_image["content"]
+        except requests.RequestException:
+            pass
+
         return {
             "found": True,
             "title": title,
             "summary": snippet,
             "url": url,
+            "image_url": image_url,
             "candidate_count": len(results),
         }
 

@@ -63,10 +63,11 @@ async def _knowledge_fallback(query: str) -> dict[str, str | None] | None:
     summary = result.get("summary")
     url = result.get("url")
     title = result.get("title")
+    image_url = result.get("image_url")
     if not summary:
         return None
     text = f"Selon Wikipédia : {summary} ({url})" if url else f"Selon Wikipédia : {summary}"
-    return {"text": text, "url": url, "title": title, "summary": summary}
+    return {"text": text, "url": url, "title": title, "summary": summary, "image_url": image_url}
 
 
 async def build_memory_response_async(

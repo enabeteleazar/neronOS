@@ -90,6 +90,7 @@ def _sync_search(query: str) -> dict:
         "title": summary_data.get("title", top_title),
         "summary": summary_data.get("extract"),
         "url": summary_data.get("content_urls", {}).get("desktop", {}).get("page"),
+        "image_url": summary_data.get("thumbnail", {}).get("source"),
         "candidate_count": len(search_hits),
     }
 

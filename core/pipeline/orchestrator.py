@@ -1036,6 +1036,7 @@ class CoreOrchestrator:
                             "title": knowledge_result.get("title"),
                             "url": knowledge_result.get("url"),
                             "summary": knowledge_result.get("summary"),
+                            "image_url": knowledge_result.get("image_url"),
                         },
                     })
                 return (
@@ -1067,6 +1068,18 @@ class CoreOrchestrator:
                         )
                         metadata["fallback_used"] = True
                         metadata["fallback_source"] = "web_provider"
+                        gw = get_gateway()
+                        if gw is not None:
+                            await gw.broadcast({
+                                "event": "memory.wikipedia_fallback",
+                                "data": {
+                                    "query": memory_query,
+                                    "title": web_result.get("title"),
+                                    "url": url,
+                                    "summary": summary,
+                                    "image_url": web_result.get("image_url"),
+                                },
+                            })
                         return (
                             web_answer,
                             provider.name,
