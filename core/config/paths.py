@@ -50,7 +50,7 @@ def find_neron_home() -> Path:
         ):
             return candidate.resolve(strict=False)
 
-    return Path("/etc/neronOS").resolve(strict=False)
+    return Path(os.getenv("NERON_ROOT", "/etc/neronOS")).resolve(strict=False)
 
 
 def resolve_neron_config(root: Path) -> Path:
