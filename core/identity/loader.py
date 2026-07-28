@@ -13,6 +13,28 @@ class IdentityError(RuntimeError):
 
 IDENTITY_PATH = Path(__file__).parent / "documents"
 
+VERSION_PLACEHOLDER = "{{version}}"
+VERSION_FALLBACK = "0.0.0"
+
+
+def _read_version() -> str:
+    """Version lue depuis le premier fichier VERSION trouve en remontant."""
+
+    for parent in Path(__file__).resolve().parents:
+
+        candidate = parent / "VERSION"
+
+        if candidate.is_file():
+            try:
+                text = candidate.read_text(encoding="utf-8").strip()
+            except OSError:
+                break
+
+            if text:
+                return text.lstrip("vV")
+
+    return VERSION_FALLBACK
+
 
 class IdentityLoader:
 
@@ -34,7 +56,7 @@ class IdentityLoader:
             )
 
         try:
-            return path.read_text(
+            content = path.read_text(
                 encoding="utf-8"
             ).strip()
 
@@ -42,6 +64,11 @@ class IdentityLoader:
             raise IdentityError(
                 f"Impossible de lire {path}"
             ) from exc
+
+        return content.replace(
+            VERSION_PLACEHOLDER,
+            _read_version()
+        )
 
 
     def _extract_value(

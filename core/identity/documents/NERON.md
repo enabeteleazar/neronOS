@@ -2,7 +2,7 @@
 
 Name: Néron
 
-Version: 4.3.0
+Version: {{version}}
 
 Rôle: Core Orchestrateur de NéronOS
 
