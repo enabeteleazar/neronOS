@@ -203,6 +203,7 @@ class RuntimeGovernor:
                 "list-units",
                 "is-active",
                 "is-enabled",
+                "show",
             }
 
             action = command[1] if len(command) > 1 else ""
