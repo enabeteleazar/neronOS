@@ -40,6 +40,7 @@ from core.providers.registry import provider_registry
 logger = get_logger("core.pipeline.orchestrator")
 
 
+
 @dataclass(frozen=True)
 class OrchestratorDecision:
     intent: str
@@ -419,6 +420,18 @@ class CoreOrchestrator:
         started = time.monotonic()
         query = query.strip()
         normalized_query = _normalize(query)
+
+        # Le message brut part en memoire AVANT le routage : toutes les routes
+        # sont couvertes, pas seulement llm_provider. Attente courte et
+        # fail-open, comme _fetch_memory_context.
+        if query:
+            try:
+                await asyncio.wait_for(
+                    self._send_to_oblivia_observe(query), timeout=3.0
+                )
+            except (asyncio.TimeoutError, Exception):
+                logger.warning("memory_write_failed", exc_info=True)
+
         decision, intent_result = await self.decide(
             query,
             explicit_route=explicit_route,
@@ -1148,6 +1161,60 @@ class CoreOrchestrator:
 
         return result["response"], provider.name, metadata
 
+    async def _fetch_memory_context(self, query: str) -> str | None:
+        """Resume memoire (Oblivia) a injecter dans le prompt de conversation
+        generale. Fail-open : ne doit jamais bloquer ni faire echouer la
+        conversation si le service memory est indisponible ou lent."""
+        del query
+        providers = provider_registry.by_type("memory")
+        provider_info = providers[0] if providers else None
+        if provider_info is None:
+            return None
+        provider = provider_registry.get(provider_info.name)
+        if provider is None:
+            return None
+        try:
+            response = await asyncio.wait_for(
+                provider.execute(
+                    ProviderRequest(
+                        action="recall",
+                        payload={"query": "que sais tu de moi", "limit": 10},
+                    ),
+                ),
+                timeout=5.0,
+            )
+        except (asyncio.TimeoutError, Exception):
+            logger.warning("memory_context_fetch_failed", exc_info=True)
+            return None
+        if response.error:
+            return None
+        result = response.result if isinstance(response.result, dict) else {}
+        answer = result.get("answer")
+        return str(answer) if answer else None
+
+    async def _send_to_oblivia_observe(self, query: str) -> None:
+        logger.debug("DEBUG_send_to_oblivia_observe_started")
+        providers = provider_registry.by_type("memory")
+        logger.debug("DEBUG_providers_found count=%d", len(providers))
+        provider_info = providers[0] if providers else None
+        if provider_info is None:
+            return
+        provider = provider_registry.get(provider_info.name)
+        if provider is None:
+            return
+        try:
+            await asyncio.wait_for(
+                provider.execute(
+                    ProviderRequest(
+                        action="observe",
+                        payload={"text": query, "source": "utilisateur"},
+                    ),
+                ),
+                timeout=260.0,
+            )
+        except Exception:
+            logger.warning("oblivia_observe_forward_failed", exc_info=True)
+
     async def _execute_llm_provider(
         self,
         query: str,
@@ -1175,11 +1242,19 @@ class CoreOrchestrator:
                 {**metadata, "error": "llm provider unavailable"},
             )
 
+        memory_context = await self._fetch_memory_context(query)
+        prompt = (
+            f"Contexte connu sur l'utilisateur : {memory_context}\n\n{query}"
+            if memory_context
+            else query
+        )
+        metadata["memory_context_used"] = bool(memory_context)
+
         provider_response = await provider.execute(
             ProviderRequest(
                 action="generate",
                 payload={
-                    "prompt": query,
+                    "prompt": prompt,
                     "task_type": "chat",
                     "context": {},
                     "model_preference": "auto",
