@@ -130,6 +130,7 @@ def _merge(rows: list[dict]) -> list[dict]:
         rows.append({
             "key": name,
             "unit": None,
+            "group": "externe",
             "registry_name": name,
             "load_state": "not-found",
             "active_state": "unknown",
@@ -161,6 +162,7 @@ def _build() -> dict:
             restarts = 0
         rows.append({
             "key": _service_key(unit),
+            "group": "applicatif" if unit.startswith("neron@") else "peripherique",
             "unit": unit,
             "load_state": f.get("LoadState", "unknown"),
             "active_state": f.get("ActiveState", "unknown"),
