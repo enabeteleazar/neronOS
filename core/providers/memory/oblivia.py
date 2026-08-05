@@ -101,6 +101,7 @@ class ObliviaProvider(ProviderProtocol):
         "recall":   ("POST", "/memory/recall"),
         "search":   ("POST", "/memory/recall"),
         "forget":   ("POST", "/memory/forget"),
+        "observe":  ("POST", "/memory/observe"),
         "status":   ("GET", "/status"),
     }
 
