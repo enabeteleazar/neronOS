@@ -74,6 +74,11 @@ class ConnectedClient:
     ws:            ServerConnection
     client_id:     str  = field(default_factory=lambda: str(uuid.uuid4())[:8])
     authenticated: bool = False
+    # Présence multi-appareils : identifiant stable cote navigateur
+    # (localStorage) et libelle choisi par l'utilisateur. None tant que
+    # le client n'a pas envoye device.announce.
+    device_id:     str | None = None
+    device_label:  str | None = None
 
     def __hash__(self) -> int:
         return hash(self.client_id)
@@ -130,6 +135,10 @@ class NeronGateway:
         self.stt_agent = stt_agent
         self.tts_agent = tts_agent
         self._clients:  dict[str, ConnectedClient] = {}
+        # Présence multi-appareils : l'appareil qui "possede" l'avatar en ce
+        # moment. None avant la toute premiere connexion annoncee.
+        self._active_device_id:    str | None = None
+        self._active_device_label: str | None = None
         self._handlers: dict[str, HandlerType]     = {
             "ping":              self._ping,
             "chat.send":         self._chat_send,
@@ -141,6 +150,8 @@ class NeronGateway:
             "skill.list":        self._skill_list,
             "voice.transcribe":  self._voice_transcribe,
             "voice.send":        self._voice_send,
+            "device.announce":   self._device_announce,
+            "presence.ping":     self._presence_ping,
         }
 
     # ── Entrée serveur ──────────────────────────────────────────────────────
@@ -404,6 +415,7 @@ class NeronGateway:
             params: Contient 'session_id' et 'message'.
         """
         # FIX: caractère chinois parasite "小块" retiré de la docstring
+        await self._maybe_switch_presence(client)
         session_id = params.get("session_id", "default")
         message    = params.get("message", "")
 
@@ -588,6 +600,7 @@ class NeronGateway:
             params: 'audio_b64' (requis), 'filename' (optionnel),
                 'session_id' (optionnel), 'synthesize' (bool, défaut False).
         """
+        await self._maybe_switch_presence(client)
         session_id = params.get("session_id", "default")
 
         if self.stt_agent is None:
@@ -743,6 +756,65 @@ class NeronGateway:
             await ws.send(json.dumps(payload, ensure_ascii=False))
         except ConnectionClosed:
             pass
+
+    async def _device_announce(self, client: ConnectedClient, params: dict) -> None:
+        """
+        Un client s'annonce avec un identifiant d'appareil stable et un
+        libelle choisi par l'utilisateur. Doit etre appele juste apres
+        gateway.auth. Si aucun appareil n'a encore la presence, celui-ci
+        la recoit automatiquement (premier connecte, premier servi).
+
+        Args:
+            client: Client qui s'annonce.
+            params: Contient 'device_id' (requis) et 'device_label' (requis).
+        """
+        device_id    = params.get("device_id")
+        device_label = params.get("device_label", device_id)
+        if not device_id:
+            raise ValueError("device_id requis")
+
+        client.device_id    = device_id
+        client.device_label = device_label
+
+        if self._active_device_id is None:
+            self._active_device_id    = device_id
+            self._active_device_label = device_label
+            logger.info("[%s] premiere presence -> %s (%s)", client.client_id, device_id, device_label)
+            await self.broadcast(_event("presence.changed", {
+                "device_id":    device_id,
+                "device_label": device_label,
+                "previous_id":  None,
+            }))
+
+    async def _presence_ping(self, client: ConnectedClient, params: dict) -> None:
+        """
+        Declencheur de presence sans effet de bord metier (ouverture d'une
+        fenetre cote Dashboard). Contrairement a chat.send/voice.send, ne
+        fait rien d'autre que verifier/basculer la presence.
+        """
+        await self._maybe_switch_presence(client)
+
+    async def _maybe_switch_presence(self, client: ConnectedClient) -> None:
+        """
+        Si le client a un device_id connu et different de l'appareil actif,
+        fait basculer la presence et diffuse presence.changed a tous les
+        clients connectes (y compris celui qui vient de la perdre).
+        """
+        if client.device_id is None:
+            return
+        if client.device_id == self._active_device_id:
+            return
+
+        previous_id = self._active_device_id
+        self._active_device_id    = client.device_id
+        self._active_device_label = client.device_label
+        logger.info("[%s] presence : %s -> %s", client.client_id, previous_id, client.device_id)
+
+        await self.broadcast(_event("presence.changed", {
+            "device_id":    client.device_id,
+            "device_label": client.device_label,
+            "previous_id":  previous_id,
+        }))
 
     async def broadcast(self, payload: dict) -> None:
         """
