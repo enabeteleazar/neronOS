@@ -188,6 +188,48 @@ class CoreOrchestrator:
                 complexity="simple",
                 requires_tool=True,
             )
+        elif intent == Intent.AGENT_ENABLE:
+            decision = OrchestratorDecision(
+                intent=Intent.AGENT_ENABLE.value,
+                selected_route="agent_manager",
+                reason="Demande d'activation d'agent traitee localement.",
+                complexity="simple",
+                requires_llm=False,
+                requires_timer=False,
+                requires_memory=False,
+                requires_tool=False,
+                requires_resolver=False,
+                requires_goal_pipeline=False,
+                requires_governor=False,
+            )
+        elif intent == Intent.AGENT_DISABLE:
+            decision = OrchestratorDecision(
+                intent=Intent.AGENT_DISABLE.value,
+                selected_route="agent_manager",
+                reason="Demande de desactivation d'agent traitee localement.",
+                complexity="simple",
+                requires_llm=False,
+                requires_timer=False,
+                requires_memory=False,
+                requires_tool=False,
+                requires_resolver=False,
+                requires_goal_pipeline=False,
+                requires_governor=False,
+            )
+        elif intent == Intent.AGENT_DELETE:
+            decision = OrchestratorDecision(
+                intent=Intent.AGENT_DELETE.value,
+                selected_route="agent_manager",
+                reason="Demande de suppression d'agent traitee localement (confirmation requise).",
+                complexity="simple",
+                requires_llm=False,
+                requires_timer=False,
+                requires_memory=False,
+                requires_tool=False,
+                requires_resolver=False,
+                requires_goal_pipeline=False,
+                requires_governor=False,
+            )
         elif intent == Intent.REGISTRY_LIST:
             decision = OrchestratorDecision(
                 intent=Intent.REGISTRY_LIST.value,
@@ -1551,6 +1593,28 @@ def _parse_agent_invocation(query: str) -> AgentInvocation | None:
     return None
 
 
+def _parse_agent_management(query: str, verbs: tuple[str, ...]) -> str | None:
+    """Extrait le slug d'agent pour active/desactive/supprime <nom>."""
+    raw = query.strip()
+    if not raw:
+        return None
+
+    verb_pattern = "|".join(verbs)
+    match = re.match(
+        rf"^\s*(?:{verb_pattern})\s+"
+        r"(?:(?:l['\u2019]?\s*agent|agent|la|le)\s+)?"
+        r"([A-Za-z0-9_.-]+)\s*$",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    slug = _clean_invoked_agent_slug(match.group(1))
+    if slug in {"la", "le", "les", "l"}:
+        return None
+    return slug or None
+
+
 def _clean_invoked_agent_slug(value: str) -> str:
     return re.sub(r"[^a-z0-9_.-]+", "", value.lower()).replace("-", "_")
 
@@ -1953,6 +2017,9 @@ def _executor_for_intent(intent: Intent) -> str:
         Intent.PERSONALITY_FEEDBACK: "personality",
         Intent.AGENT_LIST: "agent_registry",
         Intent.AGENT_RUN: "agent_runtime",
+        Intent.AGENT_ENABLE: "agent_manager",
+        Intent.AGENT_DISABLE: "agent_manager",
+        Intent.AGENT_DELETE: "agent_manager",
         Intent.PROJECT_STATUS: "project_manager",
         Intent.PROJECT_LIST: "project_manager",
     }.get(intent, "tool_router")

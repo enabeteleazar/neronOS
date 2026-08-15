@@ -32,6 +32,9 @@ class Intent(str, Enum):
     TOOL_CREATION        = "tool_creation"
     AGENT_LIST           = "agent_list"
     AGENT_RUN            = "agent_run"
+    AGENT_ENABLE         = "agent_enable"
+    AGENT_DISABLE        = "agent_disable"
+    AGENT_DELETE         = "agent_delete"
     PROJECT_STATUS       = "project_status"
     PROJECT_LIST         = "project_list"
 
@@ -189,6 +192,21 @@ _AGENT_RUN_KEYWORDS = [
     "lance l agent", "lance l'agent", "lance agent", "execute l agent",
     "execute l'agent", "execute agent", "run agent",
 ]
+_AGENT_ENABLE_KEYWORDS = [
+    "active l agent", "active l'agent", "active agent",
+    "reactive l agent", "reactive l'agent", "reactive agent",
+    "active l'", "active la ",
+]
+_AGENT_DISABLE_KEYWORDS = [
+    "desactive l agent", "desactive l'agent", "desactive agent",
+    "stoppe l agent", "stoppe l'agent", "stoppe agent",
+    "arrete l agent", "arrete l'agent", "arrete agent",
+]
+_AGENT_DELETE_KEYWORDS = [
+    "supprime l agent", "supprime l'agent", "supprime agent",
+    "efface l agent", "efface l'agent", "efface agent",
+    "supprime l'", "supprime la ",
+]
 _PERSONALITY_KEYWORDS = [
     "sois plus sympa", "sois plus gentil", "sois moins froid",
     "change ton ton", "adapte ton style", "parle autrement",
@@ -247,6 +265,12 @@ def _keyword_fallback_intent(query: str) -> Intent | None:
         return Intent.AGENT_LIST
     if any(k in q for k in _AGENT_RUN_KEYWORDS):
         return Intent.AGENT_RUN
+    if any(k in q for k in _AGENT_DELETE_KEYWORDS):
+        return Intent.AGENT_DELETE
+    if any(k in q for k in _AGENT_DISABLE_KEYWORDS):
+        return Intent.AGENT_DISABLE
+    if any(k in q for k in _AGENT_ENABLE_KEYWORDS):
+        return Intent.AGENT_ENABLE
     if any(k in q for k in _PERSONALITY_KEYWORDS):
         return Intent.PERSONALITY_FEEDBACK
 

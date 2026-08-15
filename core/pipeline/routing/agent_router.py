@@ -396,6 +396,63 @@ def _is_promote_request(query: str) -> bool:
     )
 
 
+def _extract_agent_management_slug(query: str, verbs: tuple[str, ...]) -> str | None:
+    text = unicodedata.normalize("NFC", query)
+    verb_pattern = "|".join(verbs)
+    match = re.match(
+        rf"^\s*(?:{verb_pattern})\s+"
+        r"(?:l\s+|l['\u2019]\s*)?(?:agent\s+)?"
+        r"([A-Za-z0-9_.-]+)\s*$",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    name = _clean_agent_module_name(match.group(1))
+    return name or None
+
+
+async def _enable_agent(query: str) -> str:
+    slug = _extract_agent_management_slug(query, ("active", "activer", "r[ée]active", "r[ée]activer"))
+    if not slug:
+        return "Demande incomplète. Exemple : active agent monitoring_agent"
+
+    from core.modules.self_model.agents_write import set_agent_status
+
+    try:
+        result = set_agent_status(slug, True)
+    except ValueError:
+        return f"Agent introuvable : {slug}."
+    return f"Agent {result['agent_id']} activé."
+
+
+async def _disable_agent(query: str) -> str:
+    slug = _extract_agent_management_slug(
+        query, ("d[ée]sactive", "d[ée]sactiver", "stoppe", "stopper", "arr[êe]te", "arr[êe]ter")
+    )
+    if not slug:
+        return "Demande incomplète. Exemple : désactive agent monitoring_agent"
+
+    from core.modules.self_model.agents_write import set_agent_status
+
+    try:
+        result = set_agent_status(slug, False)
+    except ValueError:
+        return f"Agent introuvable : {slug}."
+    return f"Agent {result['agent_id']} désactivé."
+
+
+async def _delete_agent(query: str) -> str:
+    slug = _extract_agent_management_slug(query, ("supprime", "supprimer", "efface", "effacer"))
+    if not slug:
+        return "Demande incomplète. Exemple : supprime agent monitoring_agent"
+
+    return (
+        f"Confirmation requise pour supprimer l'agent {slug} — "
+        f"cette action est irréversible. Répondez \"confirme suppression {slug}\" pour continuer."
+    )
+
+
 def _extract_agent_update_request(query: str) -> tuple[str, str] | None:
     text = unicodedata.normalize("NFC", query)
     match = re.match(
@@ -571,6 +628,15 @@ class AgentRouter:
 
         if _extract_agent_update_request(query):
             return await _update_dynamic_agent(query)
+
+        if intent == Intent.AGENT_DELETE:
+            return await _delete_agent(query)
+
+        if intent == Intent.AGENT_DISABLE:
+            return await _disable_agent(query)
+
+        if intent == Intent.AGENT_ENABLE:
+            return await _enable_agent(query)
 
         if _is_registry_scan_query(query):
             return await _scan_agent_registry_text()
