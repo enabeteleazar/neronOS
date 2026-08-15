@@ -165,9 +165,13 @@ class GoalEngine:
         capabilities = _capabilities_for_goal(normalized)
         complexity = _complexity(objective)
         selfmodel_context = await self.selfmodel.load()
-        selected_agent = _select_agent_from_selfmodel(
-            selfmodel_context.agents,
-            capabilities,
+        selected_agent = (
+            None
+            if "agent_creation" in capabilities
+            else _select_agent_from_selfmodel(
+                selfmodel_context.agents,
+                capabilities,
+            )
         )
         selected_provider = _select_provider_from_selfmodel(
             selfmodel_context.providers,

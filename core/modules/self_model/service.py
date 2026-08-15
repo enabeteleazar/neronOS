@@ -27,6 +27,7 @@ from core.modules.self_model.goals_snapshot import (
     _safe_task_state,
 )
 from core.modules.self_model.homelab import homelab_snapshot
+from core.modules.self_model.print_snapshot import print_snapshot
 from core.modules.self_model.services_snapshot import services_snapshot
 from core.modules.self_model.runtime_snapshot import (
     _runtime_from_status,
@@ -144,6 +145,7 @@ def build_self_model_snapshot() -> dict[str, Any]:
         "runtime": runtime,
         "services": services,
         "homelab": homelab_snapshot(),
+        "print": print_snapshot(),
         "systemd": services_snapshot(),
         "health": {
             "realtime": status.get("global_status", "unknown"),

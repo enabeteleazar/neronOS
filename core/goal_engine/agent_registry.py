@@ -79,6 +79,9 @@ class AgentRegistry:
         records = registry.list_agent_records()
         cards = [self.card_from_runtime_record(record) for record in records]
         for card in cards:
+            existing = self.get(card.agent_id)
+            if existing is not None and existing.status == "unavailable":
+                card = card.model_copy(update={"status": "unavailable"})
             self.register(card)
         return cards
 

@@ -98,13 +98,13 @@ from core.pipeline.routing.agent_router import (
 from core.gateway.gateway import GatewayConfig, NeronGateway, set_gateway
 from core.runtime_compat import (
     CapabilityResolver,
-    SessionStore,
     SkillRegistry,
     get_self_monitor,
     get_task_scheduler,
     include_optional_router,
     optional_router,
 )
+from modules.sessions import SessionStore
 from core.pipeline.intent.intent_router import IntentRouter
 from core.pipeline.orchestrator import (
     CoreOrchestrator,
