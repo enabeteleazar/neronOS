@@ -230,6 +230,20 @@ class CoreOrchestrator:
                 requires_goal_pipeline=False,
                 requires_governor=False,
             )
+        elif intent == Intent.AGENT_DELETE_CONFIRM:
+            decision = OrchestratorDecision(
+                intent=Intent.AGENT_DELETE_CONFIRM.value,
+                selected_route="agent_manager",
+                reason="Confirmation de suppression d'agent traitee localement.",
+                complexity="simple",
+                requires_llm=False,
+                requires_timer=False,
+                requires_memory=False,
+                requires_tool=False,
+                requires_resolver=False,
+                requires_goal_pipeline=False,
+                requires_governor=False,
+            )
         elif intent == Intent.REGISTRY_LIST:
             decision = OrchestratorDecision(
                 intent=Intent.REGISTRY_LIST.value,
@@ -2020,6 +2034,7 @@ def _executor_for_intent(intent: Intent) -> str:
         Intent.AGENT_ENABLE: "agent_manager",
         Intent.AGENT_DISABLE: "agent_manager",
         Intent.AGENT_DELETE: "agent_manager",
+        Intent.AGENT_DELETE_CONFIRM: "agent_manager",
         Intent.PROJECT_STATUS: "project_manager",
         Intent.PROJECT_LIST: "project_manager",
     }.get(intent, "tool_router")

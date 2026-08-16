@@ -35,6 +35,7 @@ class Intent(str, Enum):
     AGENT_ENABLE         = "agent_enable"
     AGENT_DISABLE        = "agent_disable"
     AGENT_DELETE         = "agent_delete"
+    AGENT_DELETE_CONFIRM = "agent_delete_confirm"
     PROJECT_STATUS       = "project_status"
     PROJECT_LIST         = "project_list"
 
@@ -207,6 +208,9 @@ _AGENT_DELETE_KEYWORDS = [
     "efface l agent", "efface l'agent", "efface agent",
     "supprime l'", "supprime la ",
 ]
+_AGENT_DELETE_CONFIRM_KEYWORDS = [
+    "confirme suppression", "confirme la suppression",
+]
 _PERSONALITY_KEYWORDS = [
     "sois plus sympa", "sois plus gentil", "sois moins froid",
     "change ton ton", "adapte ton style", "parle autrement",
@@ -265,6 +269,8 @@ def _keyword_fallback_intent(query: str) -> Intent | None:
         return Intent.AGENT_LIST
     if any(k in q for k in _AGENT_RUN_KEYWORDS):
         return Intent.AGENT_RUN
+    if any(k in q for k in _AGENT_DELETE_CONFIRM_KEYWORDS):
+        return Intent.AGENT_DELETE_CONFIRM
     if any(k in q for k in _AGENT_DELETE_KEYWORDS):
         return Intent.AGENT_DELETE
     if any(k in q for k in _AGENT_DISABLE_KEYWORDS):

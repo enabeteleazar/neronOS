@@ -442,6 +442,31 @@ async def _disable_agent(query: str) -> str:
     return f"Agent {result['agent_id']} désactivé."
 
 
+async def _confirm_delete_agent(query: str) -> str:
+    text = unicodedata.normalize("NFC", query)
+    match = re.match(
+        r"^\s*confirme\s+(?:la\s+)?suppression\s+"
+        r"(?:(?:l['\u2019]?\s*agent|agent)\s+)?"
+        r"([A-Za-z0-9_.-]+)\s*$",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return "Confirmation incomplète. Exemple : confirme suppression monitoring_agent"
+
+    slug = _clean_agent_module_name(match.group(1))
+    if not slug:
+        return "Confirmation incomplète. Exemple : confirme suppression monitoring_agent"
+
+    from core.modules.self_model.agents_write import delete_agent
+
+    try:
+        result = delete_agent(slug)
+    except ValueError:
+        return f"Agent introuvable : {slug}."
+    return f"Agent {result['agent_id']} supprimé définitivement."
+
+
 async def _delete_agent(query: str) -> str:
     slug = _extract_agent_management_slug(query, ("supprime", "supprimer", "efface", "effacer"))
     if not slug:
@@ -628,6 +653,9 @@ class AgentRouter:
 
         if _extract_agent_update_request(query):
             return await _update_dynamic_agent(query)
+
+        if intent == Intent.AGENT_DELETE_CONFIRM:
+            return await _confirm_delete_agent(query)
 
         if intent == Intent.AGENT_DELETE:
             return await _delete_agent(query)
