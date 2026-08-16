@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 import json
+import os
 import re
 import shlex
 import time
@@ -1306,17 +1307,41 @@ class CoreOrchestrator:
         )
         metadata["memory_context_used"] = bool(memory_context)
 
-        provider_response = await provider.execute(
-            ProviderRequest(
-                action="generate",
-                payload={
-                    "prompt": prompt,
-                    "task_type": "chat",
-                    "context": {},
-                    "model_preference": "auto",
-                },
+        # Filet de securite redondant, independant du timeout interne du
+        # provider (NERON_LLM_TIMEOUT, deja capture par ExternalLLMProvider
+        # qui ne laisse jamais rien remonter). Meme plafond + marge : ne
+        # doit jamais couper une reponse legitime mais lente (deja observe
+        # jusqu'a ~237s en conditions reelles), seulement garantir que
+        # l'orchestrator ne reste jamais bloque si ce comportement interne
+        # venait a changer.
+        llm_timeout = float(os.getenv("NERON_LLM_TIMEOUT", "240")) + 10.0
+        try:
+            provider_response = await asyncio.wait_for(
+                provider.execute(
+                    ProviderRequest(
+                        action="generate",
+                        payload={
+                            "prompt": prompt,
+                            "task_type": "chat",
+                            "context": {},
+                            "model_preference": "auto",
+                        },
+                    )
+                ),
+                timeout=llm_timeout,
             )
-        )
+        except asyncio.TimeoutError:
+            logger.error(
+                "llm_provider_orchestrator_timeout provider=%s timeout=%s",
+                provider.name,
+                llm_timeout,
+            )
+            return (
+                "Le LLM met trop de temps a repondre, reessaie dans un instant.",
+                provider.name,
+                {**metadata, "error": "orchestrator_timeout", "timeout_s": llm_timeout},
+            )
+
         result = provider_response.result if isinstance(provider_response.result, dict) else {}
         model = str(result.get("model_used") or "")
         metadata.update(

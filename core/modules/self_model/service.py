@@ -28,6 +28,7 @@ from core.modules.self_model.goals_snapshot import (
 )
 from core.modules.self_model.homelab import homelab_snapshot
 from core.modules.self_model.print_snapshot import print_snapshot
+from core.modules.self_model.doctor_snapshot import doctor_snapshot
 from core.modules.self_model.services_snapshot import services_snapshot
 from core.modules.self_model.runtime_snapshot import (
     _runtime_from_status,
@@ -146,6 +147,7 @@ def build_self_model_snapshot() -> dict[str, Any]:
         "services": services,
         "homelab": homelab_snapshot(),
         "print": print_snapshot(),
+        "doctor": doctor_snapshot(),
         "systemd": services_snapshot(),
         "health": {
             "realtime": status.get("global_status", "unknown"),

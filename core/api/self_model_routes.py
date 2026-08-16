@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter
 
 from core.modules.self_model import build_self_model_response, get_self_model
@@ -13,20 +15,29 @@ router = APIRouter(
 )
 
 
-def _snapshot() -> dict:
+def _snapshot_sync() -> dict:
     model = get_self_model()
     model.refresh()
     return model.to_dict()
 
 
+async def _snapshot() -> dict:
+    # Delegue a un thread : _snapshot_sync() finit par appeler
+    # subprocess.run() (systemctl, jusqu'a 5s x2) via services_snapshot().
+    # Execute en direct dans une route async, ca gele TOUT l'event loop du
+    # Core -- observe comme cause probable du blocage du SIGTERM a l'arret
+    # (le Dashboard interroge /self-model toutes les 2s).
+    return await asyncio.to_thread(_snapshot_sync)
+
+
 @router.get("")
 async def self_model_state() -> dict:
-    return _snapshot()
+    return (await _snapshot())
 
 
 @router.get("/summary")
 async def self_model_summary() -> dict:
-    data = _snapshot()
+    data = (await _snapshot())
     return {
         "summary": build_self_model_response("Que sais-tu de toi-même ?"),
         "state": data,
@@ -35,7 +46,7 @@ async def self_model_summary() -> dict:
 
 @router.get("/status")
 async def self_model_status() -> dict:
-    data = _snapshot()
+    data = (await _snapshot())
     return {
         "health": data["health"],
         "runtime_mode": data["runtime_mode"],
@@ -48,7 +59,7 @@ async def self_model_status() -> dict:
 
 @router.get("/context")
 async def self_model_context() -> dict:
-    data = _snapshot()
+    data = (await _snapshot())
     runtime = data.get("runtime", {}) or {}
     task_manager = get_task_manager()
 
@@ -147,27 +158,27 @@ async def self_model_context() -> dict:
 
 @router.get("/identity")
 async def identity() -> dict:
-    return _snapshot()["identity"]
+    return (await _snapshot())["identity"]
 
 
 @router.get("/capabilities")
 async def capabilities() -> dict:
-    return _snapshot()["capabilities"]
+    return (await _snapshot())["capabilities"]
 
 
 @router.get("/providers")
 async def providers() -> dict:
-    return _snapshot()["providers"]
+    return (await _snapshot())["providers"]
 
 
 @router.get("/services")
 async def services() -> dict:
-    return _snapshot()["registered_services"]
+    return (await _snapshot())["registered_services"]
 
 
 @router.get("/agents")
 async def agents() -> dict:
-    data = _snapshot()
+    data = (await _snapshot())
     return {
         **data["agent_topology"],
         "registry": data["agents"],
@@ -177,12 +188,12 @@ async def agents() -> dict:
 
 @router.get("/memory")
 async def memory() -> dict:
-    return _snapshot()["memory"]
+    return (await _snapshot())["memory"]
 
 
 @router.get("/goals")
 async def goals() -> dict:
-    data = _snapshot()
+    data = (await _snapshot())
     return {
         "engine": data["goal_engine"],
         "runtime": data["goal"],
@@ -192,4 +203,4 @@ async def goals() -> dict:
 
 @router.get("/architecture")
 async def architecture() -> dict:
-    return _snapshot()["architecture"]
+    return (await _snapshot())["architecture"]

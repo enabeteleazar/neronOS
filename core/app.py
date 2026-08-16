@@ -809,14 +809,25 @@ def health():
 
 
 async def _refresh_provider_health() -> None:
-    for provider_info in provider_registry.list():
+    # Paralleliser plutot qu'enchainer sequentiellement : avec 6 providers
+    # (memory, knowledge, wikipedia, web, llm, home_assistant), un seul
+    # provider lent (LLM sur Ollama CPU-only en particulier) faisait
+    # grimper /status a plusieurs secondes, chaque await bloquant le
+    # suivant. asyncio.gather les lance tous en meme temps ; le temps
+    # total redevient celui du provider le plus lent, pas leur somme.
+    async def _check_one(provider_info: Any) -> None:
         provider = provider_registry.get(provider_info.name)
         if provider is None:
-            continue
+            return
         try:
             await provider.health()
         except Exception as exc:
             logger.warning("Provider health refresh failed for %s: %s", provider_info.name, exc)
+
+    await asyncio.gather(
+        *(_check_one(provider_info) for provider_info in provider_registry.list()),
+        return_exceptions=True,
+    )
 
 
 @app.get("/status")
