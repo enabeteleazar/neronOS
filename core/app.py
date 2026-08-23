@@ -134,6 +134,7 @@ _OPTIONAL_ROUTER_SPECS = [
     ("action_history", "core.api.action_history_routes", True),
     ("critic_history", "core.api.critic_history_routes", True),
     ("planner", "core.api.planner_routes", False),
+    ("notify", "core.api.notify_routes", False),
 ]
 _EXTERNAL_ROUTER_SPECS = [
     ("goals", "goal.goals.routes", True),
@@ -1240,6 +1241,10 @@ async def voice_input(file: UploadFile = File(...)):
 # Planner autonome
 if globals().get("planner_router") is not None:
     _include_router_once(app, planner_router)
+
+# Notifications sortantes (Telegram, futur Dashboard)
+if globals().get("notify_router") is not None:
+    _include_router_once(app, notify_router)
 
 
 if __name__ == "__main__":
