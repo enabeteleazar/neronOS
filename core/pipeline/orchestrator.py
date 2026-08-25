@@ -424,20 +424,21 @@ class CoreOrchestrator:
         elif intent_result.entities.get("genuinely_unknown"):
             decision = OrchestratorDecision(
                 intent=Intent.CONVERSATION.value,
-                selected_route="no_match_provider",
-                reason="Classifieur n'a identifie aucune intention (target=unknown) -- repli rapide sans appel LLM pour eviter un timeout inutile.",
-                complexity=complexity,
-                requires_llm=False,
-            )
-        else:
-            decision = OrchestratorDecision(
-                intent=intent.value,
                 selected_route="llm_provider",
-                reason="Conversation ou explication generale sans moteur specialise requis.",
+                reason="Intention inconnue mais demande non spécialisée : traitement conversationnel via le provider LLM.",
                 complexity=complexity,
                 requires_llm=True,
                 requires_memory=True,
             )
+        else:
+          decision = OrchestratorDecision(
+              intent=intent.value,
+              selected_route="llm_provider",
+              reason="Conversation ou explication generale sans moteur specialise requis.",
+              complexity=complexity,
+              requires_llm=True,
+              requires_memory=True,
+          )
 
         logger.info(
             json.dumps(
