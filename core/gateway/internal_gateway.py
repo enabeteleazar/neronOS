@@ -8,7 +8,6 @@ import logging
 from typing import AsyncIterator
 
 from core.pipeline.intent.intent_router import IntentRouter
-from core.pipeline.orchestrator import CoreOrchestrator
 from core.pipeline.routing.agent_router import AgentRouter
 
 logger = logging.getLogger("neron.gateway.internal")
@@ -25,6 +24,7 @@ class InternalGateway:
         agent_router: AgentRouter,
         intent_router: IntentRouter | None = None,
     ) -> None:
+        from core.pipeline.orchestrator import CoreOrchestrator
         self.agent_router = agent_router
         self.intent_router = intent_router or IntentRouter()
         self.orchestrator = CoreOrchestrator(

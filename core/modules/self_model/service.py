@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 from core.modules.self_model.identity_snapshot import _safe_identity
 from core.modules.self_model.state import (
@@ -30,6 +31,8 @@ from core.modules.self_model.homelab import homelab_snapshot
 from core.modules.self_model.print_snapshot import print_snapshot
 from core.modules.self_model.doctor_snapshot import doctor_snapshot
 from core.modules.self_model.services_snapshot import services_snapshot
+
+logger = logging.getLogger("neron.self_model")
 from core.modules.self_model.runtime_snapshot import (
     _runtime_from_status,
     _services_from_status,
@@ -229,7 +232,22 @@ class SelfModel:
     health_global: str = "unknown"
     last_update: float | None = None
 
+    # NERONOS PHASE 2B — etat mutable garde EN MEMOIRE.
+    # Avant : chaque set_last_*/add_recent_activity faisait un
+    # lecture-modification-ecriture du fichier de 47 Ko, sans verrou, depuis
+    # plusieurs processus. Le chemin agent_router.py enchainait 7 de ces
+    # cycles pour une seule requete, et la boucle self-model ecrasait le tout
+    # toutes les 5 s. Desormais Core est seul ecrivain : les mutations restent
+    # en memoire, le fichier n est plus qu un cache de redemarrage.
+    _mutable: dict[str, Any] = field(default_factory=dict)
+    _last_persist: float = 0.0
+
+    # Intervalle minimal entre deux ecritures du cache de redemarrage.
+    PERSIST_INTERVAL_SECONDS: ClassVar[float] = 30.0
+
     def __post_init__(self) -> None:
+        # Le cache de redemarrage amorce l etat mutable, une seule fois.
+        self._mutable = _read_state()
         self.refresh()
 
     def refresh(self) -> None:
@@ -257,6 +275,13 @@ class SelfModel:
         self.health_global = snapshot["health_global"]
         self.last_update = snapshot["last_update"]
 
+        # Le cache de redemarrage est rafraichi ici, au rythme bride ci-dessus.
+        # C est ce qui remplace l ecriture periodique de neron-self-model-loop.
+        try:
+            self.save_state()
+        except Exception:            # la persistance ne doit jamais casser une lecture
+            logger.exception("self_model : persistance du cache impossible")
+
     def collect_runtime(self) -> None:
         self.refresh()
 
@@ -272,9 +297,18 @@ class SelfModel:
     def compute_runtime_mode(self) -> None:
         self.refresh()
 
-    def save_state(self) -> None:
-        existing = _read_state()
-        _write_state(existing | self.to_dict())
+    def save_state(self, *, force: bool = False) -> bool:
+        """Ecrit le cache de redemarrage. Renvoie True si l ecriture a eu lieu.
+
+        Bride a PERSIST_INTERVAL_SECONDS : le fichier est un cache, pas un
+        canal de synchronisation. `force=True` pour l arret du service.
+        """
+        now = time.time()
+        if not force and (now - self._last_persist) < self.PERSIST_INTERVAL_SECONDS:
+            return False
+        _write_state(self.to_dict())
+        self._last_persist = now
+        return True
 
     def to_dict(self) -> dict[str, Any]:
         self.identity = _safe_identity()
@@ -287,7 +321,7 @@ class SelfModel:
             "performance_self_evaluation": self.performance_self_evaluation,
             "code_awareness": self.code_awareness,
         })
-        stored = _read_state()
+        stored = self._mutable
         for key in (
             "last_event",
             "last_intent",
@@ -368,12 +402,13 @@ class SelfModel:
         self._merge_state(patch)
 
     def _merge_state(self, patch: dict[str, Any]) -> None:
-        _write_state(_read_state() | patch)
+        # Memoire seule : la persistance passe par save_state(), bridee.
+        self._mutable.update(patch)
 
     def set_last_intent(self, intent: str, confidence: Any = None) -> None:
         self._merge_state({
             "last_intent": {"intent": intent, "confidence": confidence, "timestamp": time.time()},
-            "event_count": int(_read_state().get("event_count", 0) or 0) + 1,
+            "event_count": int(self._mutable.get("event_count", 0) or 0) + 1,
         })
 
     def set_last_agent(self, agent: str | None) -> None:
@@ -399,8 +434,7 @@ class SelfModel:
         self._merge_state({"last_reasoning": {"reasoning": reasoning, "timestamp": time.time()}})
 
     def add_recent_activity(self, activity: str) -> None:
-        data = _read_state()
-        activities = data.get("recent_activity", [])
+        activities = self._mutable.get("recent_activity", [])
         if not isinstance(activities, list):
             activities = []
         activities.append({"activity": activity, "timestamp": time.time()})
