@@ -1,195 +1,37 @@
-# core/constants.py
-# Source de vérité unique pour tous les mots-clés de détection d'intent.
-# Importé par les routeurs et agents qui détectent les commandes utilisateur.
-#
-# v2.0 — Ajout des intents : NEWS_QUERY, WEATHER_QUERY, tâche utilisateur, WIKI_QUERY
-#         Inspiré de J.A.R.V.I.S (GauravSingh9356) — fonctionnalités portées
-#         dans l'architecture agent Néron (sans dépendances Windows/cloud).
+"""Compatibilite Core : mots-cles de detection d'intent.
+
+Facade sans logique propre. Implementation canonique dans
+`server/common/constants.py` (module pur, aucune dependance Core — Phase 2C).
+Conservee pour ne pas casser les imports historiques `from core.constants
+import ...`.
+"""
 
 from __future__ import annotations
 
-# ── Aide utilisateur ──────────────────────────────────────────────────────────
+from server.common.constants import (
+    CODE_AUDIT_KEYWORDS,
+    CODE_KEYWORDS,
+    HA_KEYWORDS,
+    NERON_HELP_TEXT,
+    NEWS_KEYWORDS,
+    PERSONALITY_KEYWORDS,
+    TIME_KEYWORDS,
+    TODO_KEYWORDS,
+    WEATHER_KEYWORDS,
+    WEB_KEYWORDS,
+    WIKI_KEYWORDS,
+)
 
-NERON_HELP_TEXT = """🤖 Néron — Commandes disponibles
-
-💬 Conversation
-  Envoyez n'importe quel message pour parler à Néron
-
-🧠 Orchestration
-  /goal <demande> — lance une demande complexe via Goal Engine
-
-🧪 Diagnostics directs
-  ports ouverts
-  liste les services actifs
-  statut système
-
-📊 Système
-  /status — CPU, RAM, disque, uptime
-
-🧭 Code Awareness
-  /code_map — carte simplifiée du dépôt
-  /code_search <terme> — recherche dans le code
-  /code_read <fichier> — lecture sécurisée
-  /code_analyze <fichier> — analyse AST
-  /architecture — vue globale
-
-💻 Workspace
-  /workspace — liste les fichiers du workspace
-  /run <fichier.py> — exécute un script du workspace
-
-🧠 Mémoire
-  /memory — derniers échanges mémorisés
-
-🏠 Home Assistant
-  /ha_reload — recharge les entités Home Assistant
-
-🧬 Évolution supervisée
-  /evolution propose — propose les prochaines évolutions
-  /evolution status — état des évolutions
-  /accept_evolution <id> — valide une proposition
-  /reject_evolution <id> — refuse une proposition
-  /evolution_stop — stoppe la mission active
-
-📞 Téléphonie
-  /call [message] — appel vocal via Twilio
-
-❓ /help — affiche cette aide"""
-
-# ── Mots-clés code / développement ───────────────────────────────────────────
-
-CODE_KEYWORDS: list[str] = [
-    # Génération
-    "génère", "genere",
-    "crée un fichier", "cree un fichier",
-    "écris un script", "ecris un script",
-    "écris un module", "ecris un module",
-    "écris une classe", "ecris une classe",
-    "écris une fonction", "ecris une fonction",
-    # Amélioration / correction
-    "améliore le fichier", "ameliore le fichier",
-    "améliore ce code", "ameliore ce code",
-    "optimise le fichier", "optimise ce code",
-    "corrige le fichier", "corrige ce code",
-    "refactorise",
-    # Analyse
-    "analyse le fichier", "analyse ce code",
-    "inspecte le fichier",
-    "qualité du code", "qualite du code",
-    # Lecture
-    "lis le fichier", "montre le code", "affiche le fichier",
-    # Revue / rollback
-    "self review", "auto review", "revue de code",
-    "passe en revue", "rollback", "restaure le fichier",
-]
-
-# ── Mots-clés auto-audit Néron ────────────────────────────────────────────────
-
-CODE_AUDIT_KEYWORDS: list[str] = [
-    "analyse ton code", "analyse toi", "analyse-toi",
-    "inspecte ton code", "inspecte toi", "audite toi",
-    "audite ton code", "auto audit", "auto-audit",
-    "analyse ton propre code", "inspecte ton propre code",
-    "qualite de ton code", "analyse le code de neron",
-    "inspecte le code de neron", "review de ton code",
-]
-
-# ── Mots-clés Home Assistant ──────────────────────────────────────────────────
-
-HA_KEYWORDS: list[str] = [
-    "allume", "eteins", "thermostat", "lumiere", "volet", "home assistant",
-]
-
-# ── Mots-clés recherche web ───────────────────────────────────────────────────
-
-WEB_KEYWORDS: list[str] = [
-    "cherche sur internet", "recherche sur le web", "google",
-    "trouve sur le web", "recherche en ligne",
-]
-
-# ── Mots-clés heure / date ────────────────────────────────────────────────────
-
-TIME_KEYWORDS: list[str] = [
-    "quelle heure", "il est quelle heure",
-    "quelle heure est il", "donne moi l heure",
-    "quel jour sommes", "on est quel jour",
-    "quel mois sommes", "quelle date sommes",
-    "donne moi la date", "c est quoi la date",
-    "on est le combien",
-]
-
-# ── Mots-clés feedback personnalité ──────────────────────────────────────────
-
-PERSONALITY_KEYWORDS: list[str] = [
-    "trop long", "trop verbeux", "trop bavard", "raccourcis", "sois bref",
-    "plus de détail", "développe", "explique mieux", "trop court",
-    "niveau ok", "longueur ok",
-    "sois direct", "va droit au but", "sans détour", "sans blabla",
-    "plus doux", "sois plus sympa", "moins froid", "plus chaleureux",
-    "redeviens technique", "mode technique", "sois technique",
-    "arrête de proposer", "moins de suggestions", "pas de suggestions",
-    "sois proactif", "propose plus", "anticipe",
-    "arrête d'apprendre", "désactive l'apprentissage", "mode statique",
-    "réactive l'apprentissage", "apprends de moi", "mode adaptatif",
-    "tu sembles fatigué", "sois plus énergique", "réveille-toi",
-    "calme-toi", "moins d'énergie", "sois plus calme",
-    "énergie normale", "niveau normal",
-    "mode normal", "humeur normale",
-    "sois positif", "bonne humeur", "optimiste",
-    "mode focus", "concentration", "sois sérieux",
-]
-
-# ─────────────────────────────────────────────────────────────────────────────
-# NOUVEAUX INTENTS — v2.0  (inspirés de J.A.R.V.I.S)
-# ─────────────────────────────────────────────────────────────────────────────
-
-# ── Mots-clés actualités ──────────────────────────────────────────────────────
-
-NEWS_KEYWORDS: list[str] = [
-    "actualite", "actualités", "actualites",
-    "les news", "les nouvelles", "nouvelles du jour",
-    "quoi de neuf", "headline", "journal du jour",
-    "info du jour", "infos du jour",
-    "dernières nouvelles", "dernieres nouvelles",
-    "actualité tech", "actualite tech",
-    "actualité france", "actualite france",
-    "actualité monde", "actualite monde",
-    "actualité science", "actualite science",
-]
-
-# ── Mots-clés météo ───────────────────────────────────────────────────────────
-
-WEATHER_KEYWORDS: list[str] = [
-    "meteo", "météo",
-    "temperature", "température",
-    "temps qu il fait", "quel temps",
-    "il fait combien", "combien de degrés",
-    "va-t-il pleuvoir", "va t il pleuvoir",
-    "est-ce qu il va pleuvoir", "pluie aujourd",
-    "prevision meteo", "prévision météo",
-    "vent aujourd", "humidite aujourd",
-]
-
-# ── Mots-clés liste de tâches utilisateur ─────────────────────────────────────
-
-TODO_KEYWORDS: list[str] = [
-    "ma liste", "mes taches", "mes tâches",
-    "todo", "a faire", "à faire",
-    "ajoute a ma liste", "ajoute à ma liste",
-    "rappelle-moi de", "rappelle moi de",
-    "n oublie pas de", "n'oublie pas de",
-    "note que", "j ai fait", "j'ai fait",
-    "c est fait", "c'est fait", "marque comme termine",
-    "efface tout", "vide la liste",
-]
-
-# ── Mots-clés Wikipédia ───────────────────────────────────────────────────────
-
-WIKI_KEYWORDS: list[str] = [
-    "qu est-ce que", "qu'est-ce que",
-    "c est quoi", "c'est quoi",
-    "definition de", "définition de",
-    "explique-moi", "explique moi",
-    "parle-moi de", "parle moi de",
-    "qui est", "wikipedia", "wiki",
-    "dis-moi ce qu est", "dis moi ce qu est",
+__all__ = [
+    "CODE_AUDIT_KEYWORDS",
+    "CODE_KEYWORDS",
+    "HA_KEYWORDS",
+    "NERON_HELP_TEXT",
+    "NEWS_KEYWORDS",
+    "PERSONALITY_KEYWORDS",
+    "TIME_KEYWORDS",
+    "TODO_KEYWORDS",
+    "WEATHER_KEYWORDS",
+    "WEB_KEYWORDS",
+    "WIKI_KEYWORDS",
 ]

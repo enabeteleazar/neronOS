@@ -12,7 +12,6 @@ from modules.evolution.supervisor import (
 from goal.goals.goal_manager import get_goal_manager
 from goal.goals.goal_orchestrator import get_goal_orchestrator
 from core.pipeline.orchestrator import CoreOrchestrator
-from goal.planning.storage import PlanStorage
 
 
 def _normalize(text: str) -> str:
@@ -26,13 +25,11 @@ class NeronCommandDispatcher:
         *,
         goal_orchestrator_factory=get_goal_orchestrator,
         evolution_supervisor_factory=get_evolution_supervisor,
-        plan_storage_factory=PlanStorage,
         goals_state_path: Path = NERON_DATA_DIR / "goals_state.json",
         goal_manager_factory=get_goal_manager,
     ) -> None:
         self.goal_orchestrator_factory = goal_orchestrator_factory
         self.evolution_supervisor_factory = evolution_supervisor_factory
-        self.plan_storage_factory = plan_storage_factory
         # Retained for constructor compatibility; GoalManager is authoritative.
         self.goals_state_path = goals_state_path
         self.goal_manager_factory = goal_manager_factory

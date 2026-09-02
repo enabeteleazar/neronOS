@@ -17,7 +17,6 @@ from goal.system.task_manager import get_task_manager
 from goal.system.task_executor import get_task_executor
 from modules.cognitive.critic_engine import get_critic_engine
 from goal.goals.goal_orchestrator import get_goal_orchestrator
-from goal.goals.goal_manager import get_goal_manager
 
 router = APIRouter(tags=["planner"], dependencies=[Depends(verify_api_key)])
 
@@ -193,7 +192,19 @@ async def execute_approved_plan(plan_id: str) -> dict:
 
 @router.post("/planner/from-goal")
 async def planner_from_goal() -> dict:
-    active_goal = get_goal_manager().get_active_goal()
+    # Phase 2D : l objectif actif est lu SUR le service goal (source de verite),
+    # plus dans un GoalManager importe en process. Une panne reseau doit se voir
+    # (503) et non se confondre avec « aucun objectif actif » (404).
+    from server.common.goal_client import GoalClientError, get_goal_client
+
+    try:
+        active_goal = await get_goal_client().get_active_goal()
+    except GoalClientError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Service goal injoignable : {exc}",
+        ) from exc
+
     goal_text = active_goal.get("title") if active_goal else None
 
     if not goal_text:

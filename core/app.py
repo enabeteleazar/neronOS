@@ -127,7 +127,6 @@ _OPTIONAL_ROUTER_SPECS = [
     ("self_model_write", "core.api.self_model_write_routes", True),
     ("runtime_governor", "core.api.runtime_governor_routes", True),
     ("world_model", "core.api.world_model_routes", True),
-    ("task", "core.api.task_routes", False),
     ("goal_task", "core.api.goal_task_routes", True),
     ("cognitive_core", "core.api.cognitive_core_routes", True),
     ("cognitive_report", "core.api.cognitive_report_routes", True),
@@ -136,14 +135,17 @@ _OPTIONAL_ROUTER_SPECS = [
     ("planner", "core.api.planner_routes", False),
     ("notify", "core.api.notify_routes", False),
 ]
+# Phase 2E : `goal.goals.routes` et `goal.projects.routes` ont ete retires.
+# Core ne sert pas Goal. Les monter ici faisait tourner le code de Goal DANS le
+# process Core (deux GoalManager/TaskManager distincts au-dessus du meme
+# stockage, sans verrou inter-process). L API Goal appartient a Goal:8030 ;
+# Core y accede via `server.common.goal_client`.
 _EXTERNAL_ROUTER_SPECS = [
-    ("goals", "goal.goals.routes", True),
     ("tools", "tools.routes", False),
     ("scheduler", "modules.scheduler.routes", False),
     ("agent_runtime", "agents.runtime.routes", False),
     ("capabilities", "modules.capabilities.routes", False),
     ("code_awareness", "modules.code_awareness.routes", True),
-    ("projects", "goal.projects.routes", False),
     ("evolution", "modules.evolution.routes", False),
 ]
 
@@ -614,11 +616,10 @@ async def lifespan(app: FastAPI):
                 logger.warning("Erreur arrêt Registry stale detector : %s", e)
 
 
-        try:
-            from goal.goals.background_runner import get_goal_background_runner
-            await get_goal_background_runner().shutdown()
-        except Exception as e:
-            logger.warning("Erreur arrêt workflows goals : %s", e)
+        # Phase 2E : l arret des workflows goals a ete retire. Il ne servait
+        # qu a annuler les asyncio.Task creees dans le process Core par
+        # `goal.goals.routes`, router qui n est plus monte ici. Le mecanisme
+        # reste dans Goal, ou il est utilise par le service lui-meme.
 
         try:
             from modules.scheduler.scheduler import get_task_scheduler
@@ -707,7 +708,7 @@ for router, kwargs in [
     (globals().get("selfmodel_router"), {"dependencies": _INTERNAL_AUTH}),
     (globals().get("runtime_governor_router"), {"dependencies": _INTERNAL_AUTH}),
     (globals().get("world_model_router"), {"dependencies": _INTERNAL_AUTH}),
-    (globals().get("goals_router"), {"dependencies": _INTERNAL_AUTH}),
+    # Phase 2E : goals_router / projects_router retires (routes de Goal).
     (globals().get("tools_router"), {}),
     (globals().get("scheduler_router"), {}),
     (globals().get("agent_runtime_router"), {}),
@@ -718,7 +719,6 @@ for router, kwargs in [
     (globals().get("action_history_router"), {"dependencies": _INTERNAL_AUTH}),
     (globals().get("critic_history_router"), {"dependencies": _INTERNAL_AUTH}),
     (globals().get("code_awareness_router"), {"dependencies": _INTERNAL_AUTH}),
-    (globals().get("projects_router"), {}),
     (globals().get("evolution_router"), {}),
     (globals().get("memory_router"), {"dependencies": _INTERNAL_AUTH}),
     (globals().get("knowledge_router"), {"dependencies": _INTERNAL_AUTH}),

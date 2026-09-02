@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import re
 
@@ -11,7 +12,36 @@ class IdentityError(RuntimeError):
     """Erreur de chargement de l'identité Néron."""
 
 
-IDENTITY_PATH = Path(__file__).parent / "documents"
+# Repertoire par defaut du corpus d identite. Reste la valeur de repli : c est
+# ce que Neron lit en production, ou NERON_IDENTITY_PATH n est pas defini.
+DEFAULT_IDENTITY_DIR = Path(__file__).parent / "documents"
+
+# Conserve pour compatibilite : plusieurs modules importaient cette constante.
+IDENTITY_PATH = DEFAULT_IDENTITY_DIR
+
+
+def identity_dir() -> Path:
+    """Repertoire du corpus d identite, resolu a CHAQUE appel.
+
+    NERON_IDENTITY_PATH est la source de verite officielle (decision Phase 2B).
+    Il designe le NERON.md canonique ; les documents compagnons
+    (PERSONALITY.md, CONVERSATION.md, CONTEXT.md) vivent a cote de lui. Si la
+    variable pointe deja sur un repertoire, il est pris tel quel.
+
+    La resolution est dynamique et non mise en cache : sans cela le loader
+    ignorait totalement la variable d environnement (chemin code en dur), ce
+    qui le rendait ni configurable ni testable.
+    """
+    raw = os.getenv("NERON_IDENTITY_PATH", "").strip()
+    if not raw:
+        return DEFAULT_IDENTITY_DIR
+    path = Path(raw).expanduser()
+    return path.parent if path.suffix else path
+
+
+def identity_document_path(filename: str = "NERON.md") -> Path:
+    """Chemin absolu d un document du corpus d identite."""
+    return identity_dir() / filename
 
 VERSION_PLACEHOLDER = "{{version}}"
 VERSION_FALLBACK = "0.0.0"
@@ -45,12 +75,20 @@ class IdentityLoader:
         "context": "CONTEXT.md",
     }
 
+    # Phase 2C : seul NERON.md (le corpus structure) fait foi. Les documents
+    # compagnons enrichissent le prompt quand ils existent, mais leur absence
+    # ne doit pas invalider l identite — sinon Neron n aurait pas d identite
+    # tant que PERSONALITY.md/CONVERSATION.md/CONTEXT.md ne sont pas ecrits.
+    REQUIRED_DOCUMENTS = {"identity"}
 
-    def _read_document(self, filename: str) -> str:
 
-        path = IDENTITY_PATH / filename
+    def _read_document(self, filename: str, *, required: bool) -> str:
+
+        path = identity_document_path(filename)
 
         if not path.exists():
+            if not required:
+                return ""
             raise IdentityError(
                 f"Document identité absent : {path}"
             )
@@ -92,7 +130,10 @@ class IdentityLoader:
     def load(self) -> NeronIdentity:
 
         documents = {
-            key: self._read_document(filename)
+            key: self._read_document(
+                filename,
+                required=key in self.REQUIRED_DOCUMENTS,
+            )
             for key, filename in self.DOCUMENTS.items()
         }
 
@@ -152,6 +193,10 @@ def get_identity() -> dict:
         "personality": identity.personality,
         "conversation": identity.conversation,
         "context": identity.context,
+        # Provenance : quel NERON.md a reellement ete lu. Cette cle existait
+        # dans l ancien contrat, avait disparu, et empechait de verifier la
+        # source de verite. Retablie en Phase 2B.
+        "source": str(identity_document_path()),
     }
 
 
