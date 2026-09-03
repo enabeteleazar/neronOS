@@ -1,55 +1,29 @@
+"""Compatibilite Core : modeles de contrat des providers.
+
+Facade sans logique propre. L implementation canonique vit dans
+`server/common/providers/models.py` (noyau partage, Phase 2F).
+
+Raison de l extraction : le Coeur (LLM, Memory) implemente ces contrats. Les
+garder dans Core obligeait le Coeur a dependre de Core pour parler son propre
+langage, ce que l architecture de reference ne prevoit pas.
+"""
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Literal
+from server.common.providers.models import (
+    ProviderInfo,
+    ProviderRequest,
+    ProviderResponse,
+    ProviderStatus,
+    ProviderType,
+    utc_now,
+)
 
-from pydantic import BaseModel, ConfigDict, Field
-
-
-ProviderType = Literal[
-    "memory",
-    "knowledge",
-    "llm",
-    "homeassistant",
-    "git",
-    "web",
-    "notification",
-    "generic",
+__all__ = [
+    "ProviderInfo",
+    "ProviderRequest",
+    "ProviderResponse",
+    "ProviderStatus",
+    "ProviderType",
+    "utc_now",
 ]
-
-ProviderStatus = Literal["healthy", "degraded", "unhealthy", "unavailable", "unknown"]
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-class ProviderInfo(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(min_length=1)
-    type: ProviderType
-    status: ProviderStatus = "unknown"
-    capabilities: list[str] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    registered_at: datetime = Field(default_factory=utc_now)
-    last_seen: datetime = Field(default_factory=utc_now)
-
-
-class ProviderRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    action: str = Field(min_length=1)
-    payload: dict[str, Any] = Field(default_factory=dict)
-    trace_id: str | None = None
-
-
-class ProviderResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    provider: str
-    action: str
-    status: ProviderStatus
-    result: Any = None
-    error: str | None = None
-    trace_id: str | None = None

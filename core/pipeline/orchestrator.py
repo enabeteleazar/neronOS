@@ -41,6 +41,18 @@ from core.providers.registry import provider_registry
 logger = get_logger("core.pipeline.orchestrator")
 
 
+# Civilites : reponses locales, sans modele de langage. La cascade de mots-cles
+# reconnaissait deja ces intents, mais aucune branche ne les traitait — ils
+# finissaient sur le provider LLM, soit 67 s pour repondre « Bonjour »
+# (mesure du 03/09/2026). Reponses volontairement sobres et stables : ce sont
+# des accuses de reception, pas des reponses a construire.
+_SMALLTALK_REPLIES: dict[Intent, str] = {
+    Intent.GREETING: "Bonjour. Que puis-je faire pour toi ?",
+    Intent.THANKS: "Je t'en prie.",
+    Intent.GOODBYE: "À bientôt.",
+    Intent.STATUS_SMALLTALK: "Tout va bien, merci. Et toi ?",
+}
+
 
 @dataclass(frozen=True)
 class OrchestratorDecision:
@@ -320,6 +332,26 @@ class CoreOrchestrator:
                 requires_goal_pipeline=True,
                 requires_governor=True,
             )
+        elif intent in _SMALLTALK_REPLIES:
+            # Placee AVANT la branche status : « comment vas-tu » et « ca va »
+            # sont captes par `detect_status_intent` comme `health_query`, et
+            # recevaient donc un rapport technique (« Mon systeme fonctionne
+            # normalement, les modules principaux sont charges ») la ou la
+            # cascade de mots-cles les avait — correctement — classes en
+            # `status_smalltalk`, c'est-a-dire en civilite. Une demande d'etat
+            # explicite (« quel est ton statut ») porte un autre intent et
+            # continue de passer par status_provider.
+            #
+            # Ces intents etaient DETECTES mais aucune branche ne les traitait :
+            # ils tombaient dans le `else` final, donc sur le provider LLM.
+            # Mesure du 03/09/2026 : 67 s pour repondre « Bonjour ».
+            decision = OrchestratorDecision(
+                intent=intent.value,
+                selected_route="smalltalk",
+                reason="Civilite traitee localement par le Core.",
+                complexity="simple",
+            )
+
         elif (
             status_result.get("matched") or intent == Intent.SYSTEM_STATUS
         ) and not memory_result.get("matched"):
@@ -644,6 +676,10 @@ class CoreOrchestrator:
             self._log_used("registered_agent_runtime_used", decision)
             return await self._execute_registered_agent(query, request_metadata)
 
+        if route == "smalltalk":
+            self._log_used("smalltalk_used", decision)
+            return self._execute_smalltalk(decision)
+
         if route == "timer_engine":
             self._log_used("timer_used", decision)
             return self._execute_timer(query, decision)
@@ -930,6 +966,29 @@ class CoreOrchestrator:
         }
 
         return result["response"], result["agent"], metadata
+
+    def _execute_smalltalk(
+        self,
+        decision: OrchestratorDecision,
+    ) -> tuple[str, str, dict[str, Any]]:
+        """Civilites : reponse locale immediate, aucun appel sortant."""
+        try:
+            intent = Intent(decision.intent)
+        except ValueError:
+            intent = Intent.GREETING
+
+        response = _SMALLTALK_REPLIES.get(intent, _SMALLTALK_REPLIES[Intent.GREETING])
+
+        metadata = {
+            "selected_route": "smalltalk",
+            "executor": "smalltalk_module",
+            "fallback_used": False,
+            "retries": 0,
+            "source": "smalltalk_module",
+            "llm_used": False,
+        }
+
+        return response, "smalltalk_module", metadata
 
     def _execute_timer(
         self,
@@ -1364,7 +1423,30 @@ class CoreOrchestrator:
                 {**metadata, "error": provider_response.error},
             )
 
-        return str(result.get("result") or ""), provider.name, metadata
+        text = str(result.get("result") or "")
+        if not text.strip():
+            # Echec PARTIEL du service LLM : il a repondu 200, donc ni
+            # `raise_for_status` ni `provider_response.error` ne se declenchent,
+            # mais le texte est vide et la cause est reléguée en `warning`
+            # (cote llm : `warning = result.error` quand un provider a repondu
+            # sans produire de texte — typiquement un ReadTimeout vers Ollama
+            # apres retries). Sans ce garde-fou, Core renvoyait `response: ""`
+            # avec `error: null` : l'appelant ne pouvait pas distinguer une
+            # panne d'une reponse legitimement vide. Mesure du 03/09/2026 :
+            # 265 s d'attente pour une chaine vide et aucune erreur.
+            cause = result.get("warning") or "reponse vide du service LLM"
+            logger.error(
+                "llm_provider_empty_response provider=%s cause=%s",
+                provider.name,
+                cause,
+            )
+            return (
+                "Le LLM n'a pas produit de reponse. Reessaie dans un instant.",
+                provider.name,
+                {**metadata, "error": str(cause)},
+            )
+
+        return text, provider.name, metadata
 
 
     async def _execute_registry(
