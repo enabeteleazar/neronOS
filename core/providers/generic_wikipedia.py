@@ -24,7 +24,7 @@ from .models import ProviderRequest, ProviderResponse, ProviderStatus, ProviderT
 
 _SEARCH_URL = "https://fr.wikipedia.org/w/api.php"
 _SUMMARY_URL = "https://fr.wikipedia.org/api/rest_v1/page/summary/{title}"
-_USER_AGENT = "NeronOS/1.0 (identity-lookup provider; contact: homebox)"
+_USER_AGENT = "NeronOS/1.0 (encyclopedia provider; contact: homebox)"
 _TIMEOUT = 5.0
 
 
@@ -126,7 +126,7 @@ class WikipediaProvider:
 
     @property
     def capabilities(self) -> list[str]:
-        return ["identity_lookup", "search"]
+        return ["search"]
 
     async def health(self) -> ProviderResponse:
         try:

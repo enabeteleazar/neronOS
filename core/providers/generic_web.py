@@ -2,21 +2,17 @@
 Provider recherche web generique (DuckDuckGo HTML, sans cle API) pour le Kernel Neron.
 
 Type "web" (deja reserve dans ProviderType). Implemente ProviderProtocol.
-Etape de la cascade identite : appele seulement si memoire ET Wikipedia
-n'ont rien donne.
 
 Action supportee : "search" -- payload {"query": <texte>}.
+
+Aucun appelant dans le Coeur : le provider est enregistre comme capacite
+disponible, a la main des agents. Le repli mémoire -> Wikipedia -> web a ete
+retire du Coeur avec l'ancien systeme de recherche de personne.
 
 Note : scraping HTML non-officiel (html.duckduckgo.com/html/), pas d'API
 documentee -- peut casser si DuckDuckGo change sa structure de page.
 Utilise `requests` (pas httpx, lecon du provider Wikipedia -- fingerprint
 TLS bloque par certains sites selon la librairie).
-
-Les recherches reseaux sociaux/YouTube (Instagram, X, Facebook, YouTube)
-vivent dans `generic_network.py`, pas ici -- ce fichier reste dedie a la
-recherche web generique. `_sync_search_site` est neanmoins definie ici et
-reutilisee par `generic_network.py` (utilitaire de recherche restreinte
-par domaine, partage entre les deux).
 """
 
 from __future__ import annotations
@@ -30,7 +26,7 @@ from bs4 import BeautifulSoup
 from .models import ProviderRequest, ProviderResponse, ProviderStatus, ProviderType
 
 _SEARCH_URL = "https://html.duckduckgo.com/html/"
-_USER_AGENT = "NeronOS/1.0 (identity-lookup provider; contact: homebox)"
+_USER_AGENT = "NeronOS/1.0 (web search provider; contact: homebox)"
 _TIMEOUT = 6.0
 _STOPWORDS = {"qui", "est", "le", "la", "les", "un", "une", "des", "de", "du"}
 
@@ -38,41 +34,6 @@ _STOPWORDS = {"qui", "est", "le", "la", "les", "un", "une", "des", "de", "du"}
 def _significant_words(text: str) -> set[str]:
     words = re.findall(r"\w+", text.lower())
     return {w for w in words if len(w) > 2 and w not in _STOPWORDS}
-
-
-def _sync_search_site(query: str, site: str) -> dict:
-    """Recherche restreinte a un domaine precis (site:xxx.com) via DuckDuckGo.
-
-    Utilisee pour trouver l'URL probable d'un profil sur un reseau social
-    donne, sans jamais appeler l'API du reseau lui-meme. Partagee avec
-    generic_network.py.
-    """
-    headers = {"User-Agent": _USER_AGENT}
-    resp = requests.post(
-        _SEARCH_URL,
-        data={"q": f"site:{site} {query}", "kl": "fr-fr"},
-        headers=headers,
-        timeout=_TIMEOUT,
-    )
-    resp.raise_for_status()
-
-    soup = BeautifulSoup(resp.text, "html.parser")
-    results = soup.select("div.result")
-
-    query_words = _significant_words(query)
-    for result in results:
-        title_el = result.select_one("a.result__a")
-        if title_el is None:
-            continue
-        title = title_el.get_text(strip=True)
-        url = title_el.get("href") or ""
-        if site not in url:
-            continue
-        if not (query_words & _significant_words(title)):
-            continue
-        return {"found": True, "title": title, "url": url, "candidate_count": len(results)}
-
-    return {"found": False, "title": None, "url": None, "candidate_count": len(results)}
 
 
 def _sync_search(query: str) -> dict:
@@ -156,7 +117,7 @@ class WebProvider:
 
     @property
     def capabilities(self) -> list[str]:
-        return ["identity_lookup", "search"]
+        return ["search"]
 
     async def health(self) -> ProviderResponse:
         try:

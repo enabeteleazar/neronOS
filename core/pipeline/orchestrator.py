@@ -26,11 +26,6 @@ from core.modules.status import (
     detect_status_intent,
 )
 from core.modules.memory import detect_memory_intent, build_memory_response_async
-from core.modules.memory.service import _knowledge_fallback
-from core.gateway.gateway import get_gateway
-from core.providers.generic_network import instagram_broadcast
-from core.providers.registry import provider_registry as _wp_registry
-from core.providers.models import ProviderRequest as _WebProviderRequest
 from core.modules.knowledge import build_knowledge_response_async, detect_knowledge_intent
 from core.infrastructure.registry import service_registry
 from core.infrastructure.topology import build_topology
@@ -1156,72 +1151,6 @@ class CoreOrchestrator:
             )
 
         if not results:
-            asyncio.create_task(instagram_broadcast(memory_query))
-            knowledge_result = await _knowledge_fallback(memory_query)
-            if knowledge_result:
-                metadata["fallback_used"] = True
-                metadata["fallback_source"] = "generic_provider"
-                gw = get_gateway()
-                if gw is not None:
-                    await gw.broadcast({
-                        "event": "memory.wikipedia_fallback",
-                        "data": {
-                            "source": "wikipedia",
-                            "query": memory_query,
-                            "title": knowledge_result.get("title"),
-                            "url": knowledge_result.get("url"),
-                            "summary": knowledge_result.get("summary"),
-                            "image_url": knowledge_result.get("image_url"),
-                        },
-                    })
-                return (
-                    knowledge_result["text"],
-                    provider.name,
-                    metadata,
-                )
-
-            web_providers = _wp_registry.by_type("web")
-            web_provider_info = web_providers[0] if web_providers else None
-            if web_provider_info is not None:
-                web_response = await _wp_registry.execute_via_a2a(
-                    web_provider_info.name,
-                    _WebProviderRequest(action="search", payload={"query": memory_query}),
-                )
-                web_result = (
-                    web_response.result
-                    if isinstance(web_response.result, dict)
-                    else {}
-                )
-                if not web_response.error and web_result.get("found"):
-                    summary = web_result.get("summary")
-                    url = web_result.get("url")
-                    if summary:
-                        web_answer = (
-                            f"Selon une recherche web : {summary} ({url})"
-                            if url
-                            else f"Selon une recherche web : {summary}"
-                        )
-                        metadata["fallback_used"] = True
-                        metadata["fallback_source"] = "web_provider"
-                        gw = get_gateway()
-                        if gw is not None:
-                            await gw.broadcast({
-                                "event": "memory.wikipedia_fallback",
-                                "data": {
-                                    "source": "web",
-                                    "query": memory_query,
-                                    "title": web_result.get("title"),
-                                    "url": url,
-                                    "summary": summary,
-                                    "image_url": web_result.get("image_url"),
-                                },
-                            })
-                        return (
-                            web_answer,
-                            provider.name,
-                            metadata,
-                        )
-
             return (
                 f"Je n’ai trouvé aucun souvenir correspondant à « {memory_query} ».",
                 provider.name,

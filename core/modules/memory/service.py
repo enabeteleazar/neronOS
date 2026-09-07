@@ -37,39 +37,6 @@ def _result_items(result: Any) -> list[dict[str, Any]]:
     return value if isinstance(value, list) else []
 
 
-async def _knowledge_fallback(query: str) -> dict[str, str | None] | None:
-    """Cascade vers le provider générique (Wikipédia) si la mémoire est vide.
-
-    Retourne None si aucun provider "generic" n'est enregistré, si la
-    recherche échoue, ou si rien n'est trouvé — dans tous ces cas
-    l'appelant retombe sur le message de fallback mémoire habituel.
-    """
-    providers = provider_registry.by_type("generic")
-    provider_info = providers[0] if providers else None
-    if provider_info is None:
-        return None
-
-    response = await provider_registry.execute_via_a2a(
-        provider_info.name,
-        ProviderRequest(action="search", payload={"query": query}),
-    )
-    if response.error or not isinstance(response.result, dict):
-        return None
-
-    result = response.result
-    if not result.get("found"):
-        return None
-
-    summary = result.get("summary")
-    url = result.get("url")
-    title = result.get("title")
-    image_url = result.get("image_url")
-    if not summary:
-        return None
-    text = f"Selon Wikipédia : {summary} ({url})" if url else f"Selon Wikipédia : {summary}"
-    return {"text": text, "url": url, "title": title, "summary": summary, "image_url": image_url}
-
-
 async def build_memory_response_async(
     kind: str,
     text: str,
@@ -133,8 +100,7 @@ async def build_memory_response_async(
             for item in items[:3]
         )
     else:
-        fallback = await _knowledge_fallback(payload.get("query") or normalize(text))
-        rendered = fallback or "Je n'ai pas encore de souvenir correspondant à cette question."
+        rendered = "Je n'ai pas encore de souvenir correspondant à cette question."
 
     return {
         "response": rendered,
