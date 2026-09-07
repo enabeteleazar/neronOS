@@ -105,6 +105,29 @@ class ObliviaProvider(ProviderProtocol):
         "status":   ("GET", "/status"),
     }
 
+    @staticmethod
+    def _deballer(charge: object) -> object:
+        """Retire l'enveloppe {"memory": ...} de /memory/remember.
+
+        Le Coeur lit la reponse naturelle dans `result["metadata"]
+        ["natural_response"]` (cf. pipeline/orchestrator.py, action
+        "remember"). Or memory/app.py enveloppe l'enregistrement dans une cle
+        "memory" : la cle "metadata" n'etait donc jamais a la racine et le
+        Coeur retombait TOUJOURS sur son message generique
+        "C'est memorise : <texte brut>".
+
+        Consequence en production : les reponses redigees par la memoire
+        n'ont jamais ete prononcees. "Je n'ai jamais habite a Troyes."
+        recevait "C'est memorise : Je n'ai jamais habite a Troyes." au lieu
+        de "C'est corrige : Troyes est retire de ton historique de
+        residence." Le provider est l'adaptateur entre les deux contrats :
+        c'est ici que l'enveloppe se retire.
+        """
+        if isinstance(charge, dict) and set(charge) == {"memory"}:
+            return charge["memory"]
+        return charge
+
+
     async def execute(
         self,
         request: ProviderRequest
@@ -129,7 +152,7 @@ class ObliviaProvider(ProviderProtocol):
                 provider=self.name,
                 action=request.action,
                 status="healthy",
-                result=response.json(),
+                result=self._deballer(response.json()),
                 trace_id=request.trace_id,
             )
 
