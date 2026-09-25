@@ -43,10 +43,6 @@ DOMAIN_RULES: dict[str, tuple[tuple[str, float], ...]] = {
         ("agenda", 0.98),
         ("rendez vous", 0.92),
     ),
-    "calendar": (
-        ("calendrier", 0.98),
-        ("evenement calendrier", 0.94),
-    ),
 }
 
 

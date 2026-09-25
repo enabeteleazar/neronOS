@@ -28,8 +28,8 @@ SERVER = pathlib.Path(__file__).resolve().parents[1] / "server"
 
 # Paquets de premier niveau sous server/ traites comme des plateformes.
 PLATFORMS = {
-    "agents", "calendars", "common", "core", "doctor", "goal", "integrations",
-    "llm", "memory", "modules", "print", "reminders", "tools", "voice",
+    "agents", "common", "core", "doctor", "goal", "integrations",
+    "llm", "memory", "modules", "print", "tools", "voice",
     "watchdog",
 }
 
@@ -46,7 +46,6 @@ BASELINE: dict[str, int] = {
     "agents->modules": 26,
     "agents->tools": 4,
     "agents->voice": 2,
-    "calendars->common": 2,
     "core->agents": 20,
     "core->common": 17,
     # Phase 2D : 26 -> 22. Retires : task_routes.py (code mort non monte, 2),
@@ -80,7 +79,6 @@ BASELINE: dict[str, int] = {
     "modules->goal": 15,
     "modules->tools": 3,
     "print->common": 2,
-    "reminders->common": 2,
     "tools->agents": 1,
     "tools->common": 5,
     "tools->core": 1,

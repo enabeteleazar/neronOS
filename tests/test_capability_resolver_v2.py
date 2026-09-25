@@ -62,7 +62,6 @@ def agent(
         ("Calcule le subnet 192.168.1.0/24", "subnet"),
         ("Quelle météo demain ?", "weather"),
         ("Ajoute ceci à mon agenda", "agenda"),
-        ("Ouvre mon calendrier", "calendar"),
     ],
 )
 def test_domain_classifier(text: str, domain: str):

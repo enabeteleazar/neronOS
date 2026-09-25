@@ -12,7 +12,6 @@ PROJECT_ROOT = NERON_SERVER_DIR.resolve()
 # (commit a4fdda3), le second n a jamais existe sous server/.
 ALLOWED_TOP_LEVEL_DIRS = {
     "agents",
-    "calendars",
     "common",
     "core",
     "doctor",
@@ -22,7 +21,6 @@ ALLOWED_TOP_LEVEL_DIRS = {
     "memory",
     "modules",
     "print",
-    "reminders",
     "tools",
     "voice",
     "watchdog",

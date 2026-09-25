@@ -311,8 +311,6 @@ doctor:
     - neron@voice
     - neron@doctor
     - neron@print
-    - neron@reminders
-    - neron@calendars
     - ollama
 
 # Lu par server/core/config.py (SERVER_HOST/SERVER_PORT/CORS_ORIGINS).
