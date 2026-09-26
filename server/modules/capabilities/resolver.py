@@ -112,7 +112,7 @@ class CapabilityResolver:
                 await self._queue_creation(request, decision),
             )
         if decision.decision == "use_gateway":
-            return self._remember(request, self._execute_gateway(decision))
+            return self._remember(request, await self._execute_gateway(decision))
         if decision.decision == "propose_gateway_connection":
             return self._remember(request, self._propose_gateway_connection(decision))
         if decision.decision == "no_gateway_available":
@@ -195,6 +195,7 @@ class CapabilityResolver:
                 reason=analysis.reason,
                 capability_type="gateway",
                 gateway_connector_id=analysis.gateway_connector_id,
+                domain=analysis.domain.domain,
                 safety_level=initial.safety_level if initial else "low",
             )
         if initial is None:
@@ -430,7 +431,7 @@ class CapabilityResolver:
                 decision=decision,
             )
 
-    def _execute_gateway(self, decision: CapabilityDecision) -> CapabilityResult:
+    async def _execute_gateway(self, decision: CapabilityDecision) -> CapabilityResult:
         connector = self._gateway_connector(decision.gateway_connector_id)
         if connector is None:
             return CapabilityResult(
@@ -439,12 +440,44 @@ class CapabilityResolver:
                 error="gateway_not_found",
                 decision=decision,
             )
+
+        if connector.id == "google" and decision.domain == "calendar":
+            return await self._execute_google_calendar(decision, connector)
+
         return CapabilityResult(
             status="completed",
             response=(
                 f"Je suis connecté à {connector.name} pour ce type de demande, mais "
                 "l’exécution de cette action précise n’est pas encore branchée côté Néron."
             ),
+            decision=decision,
+        )
+
+    async def _execute_google_calendar(
+        self,
+        decision: CapabilityDecision,
+        connector: Any,
+    ) -> CapabilityResult:
+        import asyncio
+
+        from gateways.actions import (
+            GatewayActionError,
+            fetch_upcoming_calendar_events,
+            format_events_for_response,
+        )
+
+        try:
+            events = await asyncio.to_thread(fetch_upcoming_calendar_events)
+        except GatewayActionError as exc:
+            return CapabilityResult(
+                status="failed",
+                response=f"Je n’ai pas pu récupérer ton agenda {connector.name} : {exc}",
+                error=str(exc),
+                decision=decision,
+            )
+        return CapabilityResult(
+            status="completed",
+            response=format_events_for_response(events),
             decision=decision,
         )
 

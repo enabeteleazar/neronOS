@@ -15,14 +15,21 @@ connectors:
     domains: [mail, contacts, notes, reminders, calendar]
     protocol: rest
     auth_type: oauth2
+    # Pas de refresh token ici : Google utilise le flux "device authorization
+    # grant" (POST /gateways/google/oauth/start puis /oauth/poll), le token
+    # obtenu est stocke a part par gateways.token_store, jamais dans
+    # secrets.env. Seuls client_id/client_secret (statiques, crees une fois
+    # dans la console Google Cloud) sont attendus ici.
     credential_env:
       - NERON_GATEWAY_GOOGLE_CLIENT_ID
       - NERON_GATEWAY_GOOGLE_CLIENT_SECRET
-      - NERON_GATEWAY_GOOGLE_REFRESH_TOKEN
     connect_hint: >-
-      Cree des identifiants OAuth2 dans la console Google Cloud (active les
-      API Gmail, Calendar, Contacts et Tasks), puis renseigne les variables
-      listees dans secrets.env avant de relancer la connexion.
+      Cree un client OAuth2 de type "TVs and Limited Input devices" dans la
+      console Google Cloud (APIs & Services > Credentials), active l'API
+      Google Calendar, renseigne NERON_GATEWAY_GOOGLE_CLIENT_ID et
+      NERON_GATEWAY_GOOGLE_CLIENT_SECRET dans secrets.env, puis lance
+      POST /gateways/google/oauth/start (le code affiche est a saisir sur
+      google.com/device) suivi de POST /gateways/google/oauth/poll.
 
   - id: microsoft
     name: Microsoft (Outlook / Microsoft 365)

@@ -43,6 +43,7 @@ dépôt au système.
 | `telegram.sh` | configuration Telegram |
 | `test_yaml.py` | validation syntaxique de `neron.yaml` |
 | `kdeps/` | tests des vérificateurs de dépendances (exclus de pytest) |
+| `setup_google_gateway.sh` | wizard : connecte le connecteur Google de `server/gateways` (OAuth device flow) |
 
 ## Note
 

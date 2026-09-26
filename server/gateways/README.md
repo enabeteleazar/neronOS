@@ -24,18 +24,30 @@ Remplace l'ancienne approche « un module dédié par service externe »
 - `GET /gateways` — liste tous les connecteurs + leur état
 - `GET /gateways/domain/{domain}` — connecteurs couvrant ce domaine (liste vide = aucune passerelle)
 - `GET /gateways/{id}` — un connecteur + son état
-- `POST /gateways/{id}/connect` — vérifie que les variables `credential_env` sont présentes dans l'environnement, marque `connected` sinon renvoie 409 avec les variables manquantes et `connect_hint`
-- `POST /gateways/{id}/disconnect` — repasse le connecteur à `configured_disconnected`
+- `POST /gateways/{id}/connect` — vérifie que les variables `credential_env` sont présentes dans l'environnement, marque `connected` sinon renvoie 409 avec les variables manquantes et `connect_hint`. **Renvoie 409 pour `google`** : voir le flux OAuth device ci-dessous.
+- `POST /gateways/{id}/disconnect` — repasse le connecteur à `configured_disconnected` et efface le refresh token stocké s'il y en a un.
+- `POST /gateways/google/oauth/start` — démarre le flux OAuth "device authorization grant" : renvoie `user_code` + `verification_url` (l'utilisateur les saisit sur `google.com/device`, sur n'importe quel appareil).
+- `POST /gateways/google/oauth/poll` — à rappeler périodiquement (toutes les `interval` secondes renvoyées par `/oauth/start`) jusqu'à `status: "connected"` (ou `"pending"` en attendant, ou 409/502 en cas d'erreur).
 
 Toutes les routes exigent l'en-tête `X-Gateways-Key` (voir `NERON_GATEWAYS_API_KEY` dans `secrets.env`).
 
+## Configurer Google
+
+`system/scripts/setup_google_gateway.sh` guide pas à pas : création du
+projet Google Cloud, activation de l'API Calendar, écran de consentement
+OAuth, identifiant OAuth de type "TVs and Limited Input devices", puis lance
+et termine le flux `/gateways/google/oauth/start` + `/oauth/poll`
+automatiquement. Nécessite `curl` et `jq`.
+
 ## Portée actuelle
 
-Ce service ne fait pas (encore) l'échange OAuth réel : `connect` vérifie la
-présence des identifiants dans `secrets.env` et bascule l'état. L'obtention
-de ces identifiants (flux OAuth2, mot de passe d'application) reste un pas
-manuel documenté par `connect_hint`. C'est une extension prévue, pas un
-changement d'API.
+- **Google** : flux OAuth réel implémenté (device authorization grant, RFC 8628) — voir `providers/google_auth.py`. Une seule action réelle branchée : lister les prochains événements Google Agenda (`providers/google_calendar.py` + `actions.py`), utilisée automatiquement par `CapabilityResolver` quand le domaine `calendar` est demandé et Google est connecté. Mail/contacts/notes/reminders via Google restent à brancher — même pattern, un nouveau `providers/google_*.py` + une entrée dans `resolver._execute_gateway`.
+- **Microsoft, Apple, GitHub, Notion** : `connect` vérifie seulement la présence d'identifiants statiques dans `secrets.env` (pas d'échange OAuth réel), et `use_gateway` renvoie un message honnête indiquant que l'exécution réelle n'est pas encore branchée. C'est une extension prévue, pas un changement d'API.
+
+Les refresh tokens obtenus par OAuth sont stockés à part (`token_store.py`,
+fichier sqlite dédié en mode 0600, jamais dans `secrets.env` ni dans
+`store.ConnectionStore` qui documente explicitement ne jamais porter de
+secret).
 
 ## Intégration Core
 

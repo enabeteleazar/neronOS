@@ -97,3 +97,61 @@ async def test_no_gateway_available_says_so_without_creating_an_agent():
     assert result.status == "completed"
     assert "pas encore de passerelle" in result.response
     assert result.decision.decision == "no_gateway_available"
+
+
+@pytest.mark.asyncio
+async def test_connected_google_calendar_returns_real_events(monkeypatch):
+    def lookup(domain: str):
+        return [(_connector("google", "Google"), _state("connected"))]
+
+    monkeypatch.setattr(
+        "gateways.registry.get_registry",
+        lambda: SimpleNamespace(get=lambda cid: _connector("google", "Google")),
+    )
+
+    async def fake_to_thread(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr("asyncio.to_thread", fake_to_thread)
+    monkeypatch.setattr(
+        "gateways.actions.fetch_upcoming_calendar_events",
+        lambda: [{"summary": "Reunion", "start": {"dateTime": "2026-09-26T10:00:00Z"}}],
+    )
+
+    resolver = _resolver(lookup)
+    result = await resolver.resolve(CapabilityRequest(text="Ouvre mon calendrier"))
+
+    assert result is not None
+    assert result.status == "completed"
+    assert "Reunion" in result.response
+    assert result.decision.domain == "calendar"
+
+
+@pytest.mark.asyncio
+async def test_connected_google_calendar_failure_is_reported_honestly(monkeypatch):
+    def lookup(domain: str):
+        return [(_connector("google", "Google"), _state("connected"))]
+
+    monkeypatch.setattr(
+        "gateways.registry.get_registry",
+        lambda: SimpleNamespace(get=lambda cid: _connector("google", "Google")),
+    )
+
+    async def fake_to_thread(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr("asyncio.to_thread", fake_to_thread)
+
+    from gateways.actions import GatewayActionError
+
+    def raise_error():
+        raise GatewayActionError("Google n'est pas connecte (aucun refresh token enregistre).")
+
+    monkeypatch.setattr("gateways.actions.fetch_upcoming_calendar_events", raise_error)
+
+    resolver = _resolver(lookup)
+    result = await resolver.resolve(CapabilityRequest(text="Ouvre mon calendrier"))
+
+    assert result is not None
+    assert result.status == "failed"
+    assert result.error is not None

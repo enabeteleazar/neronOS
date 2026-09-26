@@ -41,6 +41,7 @@ class CapabilityDecision:
     human_validation_required: bool = False
     safety_level: str = "low"
     gateway_connector_id: str | None = None
+    domain: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

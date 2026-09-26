@@ -36,3 +36,18 @@ class ConnectorView(BaseModel):
 class DomainLookupResponse(BaseModel):
     domain: str
     connectors: list[ConnectorView]
+
+
+class DeviceAuthorizationResponse(BaseModel):
+    user_code: str
+    verification_url: str
+    expires_in: int
+    interval: int
+
+
+OAuthPollStatus = Literal["pending", "connected", "error"]
+
+
+class OAuthPollResponse(BaseModel):
+    status: OAuthPollStatus
+    detail: str | None = None

@@ -80,8 +80,8 @@ BASELINE: dict[str, int] = {
     # CapabilityResolver consultent le registre de passerelles (server/gateways)
     # avant de generer un agent/tool pour un domaine externe (mail, contacts,
     # notes, reminders, calendar, repos, docs). Voir decision_engine.py et
-    # resolver.py._gateway_connector.
-    "modules->gateways": 3,
+    # resolver.py._gateway_connector / _execute_google_calendar.
+    "modules->gateways": 4,
     "modules->goal": 15,
     "modules->tools": 3,
     "print->common": 2,

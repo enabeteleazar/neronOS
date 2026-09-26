@@ -9,6 +9,7 @@ import pytest
 from gateways import app as gateways_app
 from gateways.config import cfg
 from gateways.store import ConnectionStore
+from gateways.token_store import TokenStore
 
 API_KEY = "test-gateways-key"
 HEADERS = {"X-Gateways-Key": API_KEY}
@@ -21,6 +22,10 @@ def configured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         gateways_app, "_store", ConnectionStore(path=tmp_path / "gateways.sqlite3")
     )
+    monkeypatch.setattr(
+        gateways_app, "_token_store", TokenStore(path=tmp_path / "tokens.sqlite3")
+    )
+    monkeypatch.setattr(gateways_app, "_pending_device_flows", {})
     # Le lifespan (qui pose started_at / registry_client) ne tourne pas sous
     # ASGITransport nu : on reproduit son minimum pour /health.
     gateways_app.app.state.started_at = time.monotonic()
