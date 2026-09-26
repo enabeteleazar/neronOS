@@ -71,7 +71,7 @@ health:
 	printf "│ Dashboard     %-14s %-7s│\n" "HTTP $$http" "$$dash"; \
 	if curl -sf --max-time 3 http://127.0.0.1:11434/api/tags >/dev/null; then ollama="OK"; else ollama="FAILED"; status=1; fi; \
 	printf "│ Ollama        %-14s %-7s│\n" "api/tags" "$$ollama"; \
-	for svc in core llm memory goal doctor voice print reminders calendars; do \
+	for svc in core llm memory goal doctor voice print; do \
 		state="$$(systemctl is-active neron@$$svc.service)"; \
 		if [ "$$state" = "active" ]; then result="OK"; else result="FAILED"; status=1; fi; \
 		printf "│ %-13s %-14s %-7s│\n" "$$(echo $$svc | sed 's/.*/\u&/')" "$$state" "$$result"; \

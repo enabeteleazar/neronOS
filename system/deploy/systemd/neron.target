@@ -2,8 +2,8 @@
 Description=NeronOS stack
 # Doit lister tous les noeuds declares dans neron.server.yaml et actives sur
 # l hote. Un service absent d ici n est PAS demarre par `systemctl start
-# neron.target`, meme s il est enable — c etait le cas de doctor, print,
-# reminders et calendars avant la consolidation Phase 1.
+# neron.target`, meme s il est enable — c etait le cas de doctor et print
+# avant la consolidation Phase 1.
 Wants=neron@core.service
 Wants=neron@llm.service
 Wants=neron@memory.service
@@ -11,8 +11,6 @@ Wants=neron@goal.service
 Wants=neron@doctor.service
 Wants=neron@voice.service
 Wants=neron@print.service
-Wants=neron@reminders.service
-Wants=neron@calendars.service
 After=network-online.target
 
 [Install]

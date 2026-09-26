@@ -20,8 +20,8 @@ LEGACY_HOMELAB_RE = re.compile(r"/srv/homelab/server-1/neronOS")
 # Sous-modules : hors perimetre du depot parent, corriges dans leur propre
 # depot (Phase 2/3). Voir system/docs/architecture/neronos-architecture.md.
 SUBMODULE_DIRS = {
-    "calendars", "core", "doctor", "goal", "llm", "memory",
-    "print", "reminders", "voice", "watchdog",
+    "core", "doctor", "goal", "llm", "memory",
+    "print", "voice", "watchdog",
 }
 
 

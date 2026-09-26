@@ -15,10 +15,9 @@ neron = "common.cli:main"
 where = ["server"]
 # Doit rester aligne sur les repertoires de server/.
 # "providers*" a ete retire (server/providers n a jamais existe) ; les services
-# ajoutes depuis (doctor, print, reminders, calendars, watchdog) sont declares.
+# ajoutes depuis (doctor, print, watchdog) sont declares.
 include = [
     "agents*",
-    "calendars*",
     "common*",
     "core*",
     "doctor*",
@@ -28,7 +27,6 @@ include = [
     "memory*",
     "modules*",
     "print*",
-    "reminders*",
     "tools*",
     "voice*",
     "watchdog*",

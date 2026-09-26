@@ -14,7 +14,7 @@ Sous-modules Git (un dépôt chacun) :
 | `goal/` | Architecte | objectifs, plans, projets, exécution |
 | `doctor/` | Architecte | diagnostic et autocorrection |
 | `watchdog/` | Architecte | surveillance — **vide à ce jour (v0.0.0)** |
-| `voice/`, `print/`, `reminders/`, `calendars/` | Capabilities | services externes |
+| `voice/`, `print/` | Capabilities | services externes |
 
 Code porté par le dépôt parent :
 

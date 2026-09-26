@@ -29,7 +29,7 @@ NERON_ROOT = "/etc/neronOS"
 # comme noeud dans neron.server.yaml, sinon common.serve refuse de demarrer.
 TEMPLATED_SERVICES = (
     "core", "llm", "memory", "goal", "doctor",
-    "voice", "print", "reminders", "calendars",
+    "voice", "print",
 )
 
 # Unites autonomes (boucles et sidecars), avec le module python qu elles lancent.
