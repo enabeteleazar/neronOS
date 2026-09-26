@@ -43,3 +43,7 @@
 	path = server/print
 	url = git@github.com:enabeteleazar/neronPrint.git
 	branch = develop
+[submodule "server/gateways"]
+	path = server/gateways
+	url = git@github.com:enabeteleazar/neronGateways.git
+	branch = develop
