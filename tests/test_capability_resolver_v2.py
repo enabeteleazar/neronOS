@@ -63,6 +63,16 @@ def agent(
         ("Quelle météo demain ?", "weather"),
         ("Ajoute ceci à mon agenda", "agenda"),
         ("Ouvre mon calendrier", "calendar"),
+        ("Montre mes mails", "mail"),
+        ("Ouvre ma boîte de réception", "mail"),
+        ("Montre mes contacts", "contacts"),
+        ("Cherche dans mon carnet d'adresses", "contacts"),
+        ("Montre mes notes", "notes"),
+        ("Montre mes rappels", "reminders"),
+        ("Liste mes rappels Google", "reminders"),
+        ("Ouvre mon repo", "repos"),
+        ("Montre la pull request", "repos"),
+        ("Ouvre ma page Notion", "docs"),
     ],
 )
 def test_domain_classifier(text: str, domain: str):

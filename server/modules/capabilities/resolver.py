@@ -111,6 +111,12 @@ class CapabilityResolver:
                 request,
                 await self._queue_creation(request, decision),
             )
+        if decision.decision == "use_gateway":
+            return self._remember(request, self._execute_gateway(decision))
+        if decision.decision == "propose_gateway_connection":
+            return self._remember(request, self._propose_gateway_connection(decision))
+        if decision.decision == "no_gateway_available":
+            return self._remember(request, self._no_gateway_available(decision))
         return None
 
     def decide(self, request: CapabilityRequest) -> CapabilityDecision | None:
@@ -178,6 +184,19 @@ class CapabilityResolver:
                     "medium" if creation_type == "agent" else "low"
                 ),
             )
+        if analysis.decision in {
+            "use_gateway",
+            "propose_gateway_connection",
+            "no_gateway_available",
+        }:
+            return CapabilityDecision(
+                decision=analysis.decision,
+                confidence=analysis.confidence,
+                reason=analysis.reason,
+                capability_type="gateway",
+                gateway_connector_id=analysis.gateway_connector_id,
+                safety_level=initial.safety_level if initial else "low",
+            )
         if initial is None:
             return None
         return self._legacy_decision(request, initial)
@@ -206,7 +225,7 @@ class CapabilityResolver:
             understanding,
             self.registry.list_capabilities(),
         )
-        decision, confidence, reason = self.decision_engine.decide(
+        decision, confidence, reason, extra = self.decision_engine.decide(
             text,
             understanding,
             match,
@@ -234,6 +253,7 @@ class CapabilityResolver:
             missing_tools=list(match.missing_tools) if match is not None else [],
             provider=understanding.provider,
             reason=reason,
+            gateway_connector_id=extra.get("gateway_connector_id"),
         )
 
     def _legacy_decision(
@@ -409,6 +429,56 @@ class CapabilityResolver:
                 error=str(exc),
                 decision=decision,
             )
+
+    def _execute_gateway(self, decision: CapabilityDecision) -> CapabilityResult:
+        connector = self._gateway_connector(decision.gateway_connector_id)
+        if connector is None:
+            return CapabilityResult(
+                status="failed",
+                response="Le connecteur attendu n’est plus disponible.",
+                error="gateway_not_found",
+                decision=decision,
+            )
+        return CapabilityResult(
+            status="completed",
+            response=(
+                f"Je suis connecté à {connector.name} pour ce type de demande, mais "
+                "l’exécution de cette action précise n’est pas encore branchée côté Néron."
+            ),
+            decision=decision,
+        )
+
+    def _propose_gateway_connection(self, decision: CapabilityDecision) -> CapabilityResult:
+        connector = self._gateway_connector(decision.gateway_connector_id)
+        if connector is None:
+            return CapabilityResult(
+                status="failed",
+                response="Le connecteur attendu n’est plus disponible.",
+                error="gateway_not_found",
+                decision=decision,
+            )
+        return CapabilityResult(
+            status="action_required",
+            response=(
+                f"Je peux me connecter à {connector.name} pour ce type de demande, "
+                f"mais ce n’est pas encore fait. {connector.connect_hint}"
+            ),
+            decision=decision,
+        )
+
+    def _no_gateway_available(self, decision: CapabilityDecision) -> CapabilityResult:
+        return CapabilityResult(
+            status="completed",
+            response="Je n’ai pas encore de passerelle disponible pour ce type de demande.",
+            decision=decision,
+        )
+
+    def _gateway_connector(self, connector_id: str | None) -> Any | None:
+        if not connector_id:
+            return None
+        from gateways.registry import get_registry
+
+        return get_registry().get(connector_id)
 
     async def _queue_creation(
         self,

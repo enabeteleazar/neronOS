@@ -47,6 +47,46 @@ DOMAIN_RULES: dict[str, tuple[tuple[str, float], ...]] = {
         ("calendrier", 0.98),
         ("evenement calendrier", 0.94),
     ),
+    # Domaines couverts par le registre de passerelles (server/gateways) :
+    # voir DecisionEngine._GATEWAY_DOMAINS, qui route ces domaines vers un
+    # connecteur externe plutot que vers la creation d'une capacite.
+    "mail": (
+        ("mail", 0.95),
+        ("mails", 0.95),
+        ("email", 0.95),
+        ("emails", 0.95),
+        ("courriel", 0.95),
+        ("boite mail", 0.96),
+        ("boite de reception", 0.97),
+    ),
+    "contacts": (
+        ("mes contacts", 0.98),
+        ("carnet d adresses", 0.97),
+        ("numero de telephone de", 0.9),
+    ),
+    "notes": (
+        ("mes notes", 0.97),
+        ("prise de notes", 0.95),
+        ("bloc notes", 0.93),
+    ),
+    "reminders": (
+        ("mes rappels", 0.96),
+        ("liste de rappels", 0.96),
+        ("rappels google", 0.98),
+        ("rappels outlook", 0.98),
+    ),
+    "repos": (
+        ("mon repo", 0.95),
+        ("mes repos", 0.95),
+        ("depot github", 0.97),
+        ("pull request", 0.96),
+        ("issue github", 0.96),
+    ),
+    "docs": (
+        ("page notion", 0.97),
+        ("mes docs notion", 0.97),
+        ("document notion", 0.96),
+    ),
 }
 
 

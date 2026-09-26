@@ -40,6 +40,7 @@ class CapabilityDecision:
     async_required: bool = False
     human_validation_required: bool = False
     safety_level: str = "low"
+    gateway_connector_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -169,6 +170,7 @@ class ResolverAnalysis:
     missing_tools: list[str] = field(default_factory=list)
     provider: str = "rules"
     reason: str = ""
+    gateway_connector_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -187,4 +189,5 @@ class ResolverAnalysis:
             "provider": self.provider,
             "reason": self.reason,
             "evidence": self.domain.evidence,
+            "gateway_connector_id": self.gateway_connector_id,
         }

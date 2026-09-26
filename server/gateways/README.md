@@ -36,3 +36,23 @@ présence des identifiants dans `secrets.env` et bascule l'état. L'obtention
 de ces identifiants (flux OAuth2, mot de passe d'application) reste un pas
 manuel documenté par `connect_hint`. C'est une extension prévue, pas un
 changement d'API.
+
+## Intégration Core
+
+`server/modules/capabilities/decision_engine.py` consulte ce registre (en
+process, lecture directe de `registry.py`/`store.py` — pas d'appel HTTP,
+même logique que les dépendances `goal`/`agents`/`tools` du resolver) pour
+les domaines `mail`, `contacts`, `notes`, `reminders`, `calendar`, `repos`,
+`docs` : avant de générer un agent ou un tool pour une demande ponctuelle
+sur l'un de ces domaines, il regarde si un connecteur le couvre.
+
+- Connecteur connecté → la demande est routée vers ce connecteur (l'appel
+  réel à l'API du connecteur reste à implémenter, cf. section précédente).
+- Connecteur couvrant le domaine mais pas connecté → Néron propose de se
+  connecter (`connect_hint`).
+- Aucun connecteur pour ce domaine → Néron l'indique explicitement, sans
+  tenter de générer un agent de remplacement.
+
+Une demande *durable* (« surveille mes mails ») n'est pas interceptée : elle
+continue vers le Goal Engine, ce comportement est hors de la portée de cette
+itération.

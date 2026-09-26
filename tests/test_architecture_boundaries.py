@@ -76,6 +76,12 @@ BASELINE: dict[str, int] = {
     "modules->agents": 4,
     "modules->common": 18,
     "modules->core": 14,
+    # Couplage volontaire (pas une dette) : DecisionEngine et
+    # CapabilityResolver consultent le registre de passerelles (server/gateways)
+    # avant de generer un agent/tool pour un domaine externe (mail, contacts,
+    # notes, reminders, calendar, repos, docs). Voir decision_engine.py et
+    # resolver.py._gateway_connector.
+    "modules->gateways": 3,
     "modules->goal": 15,
     "modules->tools": 3,
     "print->common": 2,
