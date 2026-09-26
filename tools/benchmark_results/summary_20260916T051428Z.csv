@@ -1,0 +1,3 @@
+model,n_total,n_success,success_rate_pct,error_rate_pct,latency_ms_mean,latency_ms_median,latency_ms_stdev,latency_ms_min,latency_ms_max,latency_ms_p95,truncation_rate_pct,response_len_words_mean
+llama3.2:1b,4,2,50.0,50.0,39923,39923.0,43569.1,9115,70731,67650.2,0.0,7
+qwen2.5:1.5b,5,4,80.0,20.0,41202,32737.5,39695.0,3852,95481,87721.3,25.0,15.8

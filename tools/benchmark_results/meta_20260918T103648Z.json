@@ -1,0 +1,52 @@
+{
+  "timestamp_utc": "20260918T103648Z",
+  "mission": "V3 validation reelle",
+  "model_a_baseline": "llama3.2:1b",
+  "model_b_candidate": "qwen2.5:1.5b",
+  "num_predict": 64,
+  "reps": 5,
+  "seed": 42,
+  "preflight": {
+    "ollama": "0.30.8",
+    "neron_llm_prod_health": {
+      "status": "ok",
+      "service": "neron_llm",
+      "version": "3.0.0",
+      "providers": {
+        "ollama": "up",
+        "claude": "configured"
+      }
+    },
+    "neron_services_running": [
+      "neron-client.service",
+      "neron-cognitive-loop.service",
+      "neron-dashboard.service",
+      "neron-homeassistant-registry.service",
+      "neron-voice-interface.service",
+      "neron-world-model-loop.service",
+      "neron@calendars.service",
+      "neron@core.service",
+      "neron@doctor.service",
+      "neron@goal.service",
+      "neron@llm.service",
+      "neron@memory.service",
+      "neron@print.service",
+      "neron@reminders.service",
+      "neron@voice.service"
+    ],
+    "hardware": {
+      "cpu": "Intel(R) Pentium(R) CPU G3240T @ 2.70GHz",
+      "cpu_count": 2,
+      "ram_total_mb": 7330,
+      "ram_available_mb": 3957,
+      "gpu": "Aucun GPU detecte (pas de nvidia-smi)"
+    },
+    "load_avg": {
+      "1min": 1.13623046875,
+      "5min": 1.24755859375,
+      "15min": 0.91650390625
+    },
+    "other_benchmarks_running": []
+  },
+  "test_service": "instance FastAPI jetable montant le vrai router server/llm/api/routes.py, SANS create_service_app (donc sans enregistrement au registry Core) — port dedie, config temporaire, aucun impact sur neron@llm.service."
+}

@@ -1,0 +1,44 @@
+{
+  "timestamp_utc": "20260914T172734Z",
+  "ollama_version": "0.30.8",
+  "hardware": {
+    "cpu": "Intel(R) Pentium(R) CPU G3240T @ 2.70GHz",
+    "cpu_count": 2,
+    "ram_total_mb": 7330,
+    "ram_available_mb": 2441,
+    "gpu": "Aucun GPU detecte (pas de nvidia-smi)"
+  },
+  "models": {
+    "llama3.2:1b": "llama3.2:1b",
+    "qwen2.5:1.5b": "qwen2.5:1.5b"
+  },
+  "num_predicts": [
+    0,
+    32,
+    48,
+    64,
+    96,
+    128
+  ],
+  "runs": 3,
+  "warmup": 0,
+  "levels": [
+    "a",
+    "b"
+  ],
+  "timeout_s": 150.0,
+  "test_ids": [
+    "t1_factuelle",
+    "t2_calcul",
+    "t3_comprehension",
+    "t4_instruction",
+    "t5_concision",
+    "t6_contexte",
+    "t7_raisonnement",
+    "t8_francais",
+    "t9_instruction_stricte",
+    "t10_simulation"
+  ],
+  "methodology_note_niveau_b": "num_predict=0 -> appel HTTP direct au service de production reel (POST /llm/generate, config neron.yaml inchangee). num_predict in {32,48,64,96,128} -> LLMManager reel instancie dans un sous-processus isole, pointe via NERON_CONFIG vers une copie temporaire de neron.yaml ou seul ollama_num_predict differe. Le service de production (neron@llm.service) n'a jamais ete modifie ni redemarre.",
+  "known_gap_found": "server/llm/providers/ollama.py n'envoie jamais 'keep_alive' a Ollama (verifie par lecture du code) : la valeur llm.keep_alive=10m documentee dans neron.yaml n'est PAS appliquee par le code actuel. Ollama retombe sur son propre defaut (5 min). Sans impact sur ce benchmark (calls rapproches dans le temps) mais pertinent pour l'analyse de latence prod."
+}

@@ -1,0 +1,110 @@
+{
+  "n_total": 84,
+  "n_success": 84,
+  "success_rate_pct": 100.0,
+  "error_rate_pct": 0.0,
+  "empty_rate_pct": 0.0,
+  "truncation_rate_pct": 42.9,
+  "correctness_pct_sur_prompts_verifiables": 80.6,
+  "latency_ms_mean": 18827.2,
+  "latency_ms_median": 21752.5,
+  "latency_ms_stdev": 11065.7,
+  "latency_ms_min": 1029,
+  "latency_ms_max": 34460,
+  "latency_ms_p95": 31970.6,
+  "response_len_words_mean": 38.4,
+  "by_category": {
+    "A_courte": {
+      "n": 15,
+      "truncation_rate_pct": 13.3
+    },
+    "B_naturelle": {
+      "n": 15,
+      "truncation_rate_pct": 100.0
+    },
+    "C_stricte": {
+      "n": 15,
+      "truncation_rate_pct": 0.0
+    },
+    "D_raisonnement": {
+      "n": 15,
+      "truncation_rate_pct": 46.7
+    },
+    "E_contexte": {
+      "n": 15,
+      "truncation_rate_pct": 20.0
+    },
+    "L_longueur": {
+      "n": 9,
+      "truncation_rate_pct": 100.0
+    }
+  },
+  "warmup_count": 2,
+  "warmup_success": 2,
+  "warmup_failure": 0,
+  "health_before": {
+    "load1": 2.1650390625,
+    "load5": 2.435546875,
+    "load15": 2.0478515625,
+    "ram_available_mb": 3933,
+    "swap_used_mb": 2064
+  },
+  "health_after": {
+    "load1": 2.0732421875,
+    "load5": 2.20703125,
+    "load15": 2.1689453125,
+    "ram_available_mb": 3722,
+    "swap_used_mb": 2109
+  },
+  "health_samples": [
+    {
+      "load1": 2.1650390625,
+      "load5": 2.435546875,
+      "load15": 2.0478515625,
+      "ram_available_mb": 3933,
+      "swap_used_mb": 2064
+    },
+    {
+      "load1": 2.1513671875,
+      "load5": 2.42822265625,
+      "load15": 2.04736328125,
+      "ram_available_mb": 3899,
+      "swap_used_mb": 2064
+    },
+    {
+      "load1": 2.18994140625,
+      "load5": 2.3408203125,
+      "load15": 2.064453125,
+      "ram_available_mb": 3887,
+      "swap_used_mb": 2074
+    },
+    {
+      "load1": 2.05126953125,
+      "load5": 2.25244140625,
+      "load15": 2.060546875,
+      "ram_available_mb": 3864,
+      "swap_used_mb": 2073
+    },
+    {
+      "load1": 2.12890625,
+      "load5": 2.15966796875,
+      "load15": 2.07763671875,
+      "ram_available_mb": 3868,
+      "swap_used_mb": 2084
+    },
+    {
+      "load1": 2.14013671875,
+      "load5": 2.1328125,
+      "load15": 2.09130859375,
+      "ram_available_mb": 3804,
+      "swap_used_mb": 2092
+    },
+    {
+      "load1": 2.25244140625,
+      "load5": 2.208984375,
+      "load15": 2.150390625,
+      "ram_available_mb": 3747,
+      "swap_used_mb": 2103
+    }
+  ]
+}

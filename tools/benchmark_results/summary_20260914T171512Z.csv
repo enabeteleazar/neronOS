@@ -1,0 +1,17 @@
+model,level,num_predict,test_id,n_runs,n_success,stability_pct,wall_duration_s_mean,wall_duration_s_median,wall_duration_s_stdev,time_to_first_token_s_mean,eval_count_mean,generation_tokens_per_second,response_word_count_mean
+llama3.2:1b,A_ollama_direct,32,t1_factuelle,1,1,100.0,28.34150060099637,28.34150060099637,0.0,17.098323603997414,32,2.963939416337345,22.0
+llama3.2:1b,A_ollama_direct,32,t4_instruction,1,1,100.0,10.014436404002481,10.014436404002481,0.0,9.202942282005097,3,4.852052822681729,1.0
+llama3.2:1b,B_neron_llm_inprocess,32,t1_factuelle,1,1,100.0,17.91711873099848,17.91711873099848,0.0,,,,7.0
+llama3.2:1b,B_neron_llm_inprocess,32,t2_calcul,1,1,100.0,15.877335825003684,15.877335825003684,0.0,,,,23.0
+llama3.2:1b,B_neron_llm_inprocess,32,t3_comprehension,1,1,100.0,26.97836712699791,26.97836712699791,0.0,,,,19.0
+llama3.2:1b,B_neron_llm_inprocess,32,t4_instruction,1,1,100.0,19.308801943996514,19.308801943996514,0.0,,,,1.0
+llama3.2:1b,B_neron_llm_inprocess,32,t5_concision,1,1,100.0,14.806032621003396,14.806032621003396,0.0,,,,21.0
+llama3.2:1b,B_neron_llm_inprocess,32,t6_contexte,1,1,100.0,29.08082423900487,29.08082423900487,0.0,,,,27.0
+llama3.2:1b,B_neron_llm_inprocess,32,t7_raisonnement,1,1,100.0,31.39379804700002,31.39379804700002,0.0,,,,21.0
+llama3.2:1b,B_neron_llm_inprocess,32,t8_francais,1,1,100.0,26.18107030399551,26.18107030399551,0.0,,,,25.0
+llama3.2:1b,B_neron_llm_inprocess,32,t9_instruction_stricte,1,1,100.0,15.72309889600001,15.72309889600001,0.0,,,,1.0
+llama3.2:1b,B_neron_llm_inprocess,32,t10_simulation,1,1,100.0,19.983306705005816,19.983306705005816,0.0,,,,23.0
+llama3.2:1b,A_ollama_direct,0,t1_factuelle,1,1,100.0,26.783221220000996,26.783221220000996,0.0,19.703379888997006,30,4.238069903855147,21.0
+llama3.2:1b,A_ollama_direct,0,t4_instruction,1,1,100.0,11.734771308001655,11.734771308001655,0.0,11.463937929998792,2,7.402828620816014,1.0
+llama3.2:1b,B_neron_llm_live,0,t1_factuelle,1,1,100.0,15.299528956005815,15.299528956005815,0.0,,,,7.0
+llama3.2:1b,B_neron_llm_live,0,t4_instruction,1,1,100.0,11.288551718993403,11.288551718993403,0.0,,,,1.0

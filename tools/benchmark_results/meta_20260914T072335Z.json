@@ -1,0 +1,25 @@
+{
+  "timestamp_utc": "20260914T072335Z",
+  "ollama_version": "0.30.8",
+  "hardware": {
+    "cpu": "Intel(R) Pentium(R) CPU G3240T @ 2.70GHz",
+    "cpu_count": 2,
+    "ram_total_mb": 7330,
+    "ram_available_mb": 2939,
+    "gpu": "Aucun GPU detecte (pas de nvidia-smi)"
+  },
+  "models_requested": [
+    "qwen3:1.7b"
+  ],
+  "models_resolved": {
+    "qwen3:1.7b": "qwen3:1.7b"
+  },
+  "runs": 1,
+  "warmup": 0,
+  "levels": [
+    "a",
+    "b"
+  ],
+  "max_tokens": 100,
+  "timeout_s": 90.0
+}

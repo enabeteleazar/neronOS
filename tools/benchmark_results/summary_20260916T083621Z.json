@@ -1,0 +1,30 @@
+{
+  "llama3.2:1b": {
+    "n_total": 3,
+    "n_success": 1,
+    "success_rate_pct": 33.3,
+    "error_rate_pct": 66.7,
+    "latency_ms_mean": 112146,
+    "latency_ms_median": 112146,
+    "latency_ms_stdev": 0.0,
+    "latency_ms_min": 112146,
+    "latency_ms_max": 112146,
+    "latency_ms_p95": 112146,
+    "truncation_rate_pct": 0.0,
+    "response_len_words_mean": 7
+  },
+  "qwen2.5:1.5b": {
+    "n_total": 5,
+    "n_success": 4,
+    "success_rate_pct": 80.0,
+    "error_rate_pct": 20.0,
+    "latency_ms_mean": 30832.8,
+    "latency_ms_median": 28648.5,
+    "latency_ms_stdev": 31667.1,
+    "latency_ms_min": 3447,
+    "latency_ms_max": 62587,
+    "latency_ms_p95": 61232.0,
+    "truncation_rate_pct": 0.0,
+    "response_len_words_mean": 7
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "timestamp_utc": "20260918T204530Z",
+  "mission": "V4 recherche seuil num_predict",
+  "model": "qwen2.5:1.5b",
+  "num_predicts": [
+    64,
+    80,
+    96,
+    128,
+    160
+  ],
+  "reps": 3,
+  "warmup": 1,
+  "seed": 42,
+  "reps_reduced_from_5": true,
+  "preflight": {
+    "ollama": "0.30.8",
+    "neron_llm_prod_health": {
+      "status": "ok",
+      "service": "neron_llm",
+      "version": "3.0.0",
+      "providers": {
+        "ollama": "up",
+        "claude": "configured"
+      }
+    },
+    "neron_services_running": [
+      "neron-client.service",
+      "neron-cognitive-loop.service",
+      "neron-dashboard.service",
+      "neron-homeassistant-registry.service",
+      "neron-voice-interface.service",
+      "neron-world-model-loop.service",
+      "neron@calendars.service",
+      "neron@core.service",
+      "neron@doctor.service",
+      "neron@goal.service",
+      "neron@llm.service",
+      "neron@memory.service",
+      "neron@print.service",
+      "neron@reminders.service",
+      "neron@voice.service"
+    ],
+    "hardware": {
+      "cpu": "Intel(R) Pentium(R) CPU G3240T @ 2.70GHz",
+      "cpu_count": 2,
+      "ram_total_mb": 7330,
+      "ram_available_mb": 3059,
+      "gpu": "Aucun GPU detecte (pas de nvidia-smi)"
+    },
+    "load_avg": {
+      "1min": 1.15234375,
+      "5min": 0.478515625,
+      "15min": 0.20947265625
+    },
+    "swap_mb": {
+      "total": 4095,
+      "free": 2949,
+      "used": 1146
+    },
+    "external_node_processes": [],
+    "docker_containers": [],
+    "active_sessions": [],
+    "top_cpu_processes": [
+      "1945750 ollama   96.5 llama-server",
+      "1945894 neron    84.8 python",
+      "   1227 kula      4.0 kula",
+      " 396246 neron     2.1 2.1.251",
+      "  24874 neron     0.7 claude"
+    ],
+    "other_benchmarks_running": []
+  },
+  "md5_neron_yaml_before": "f1ada624a0074fede58f17fa430f668b  /etc/neronOS/neron.yaml",
+  "test_service": "5 instances FastAPI jetables paralleles (une par num_predict), montant le vrai router server/llm/api/routes.py, sans create_service_app (pas d'enregistrement registry), chacune sur son port avec sa propre copie temporaire de neron.yaml.",
+  "tokens_per_word_ratio_utilise": 1.85
+}

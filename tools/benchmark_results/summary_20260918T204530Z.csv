@@ -1,0 +1,6 @@
+num_predict,n_total,n_success,success_rate_pct,error_rate_pct,empty_rate_pct,truncation_rate_pct,limit_hit_rate_pct_estime,correctness_pct_sur_prompts_verifiables,latency_ms_mean,latency_ms_median,latency_ms_stdev,latency_ms_min,latency_ms_max,latency_ms_p95,response_len_words_mean,response_len_words_median
+128,63,63,100.0,0.0,0.0,42.9,52.4,76.2,24256.0,33587,14796.4,922,37628,37330.2,51.2,68
+96,63,63,100.0,0.0,0.0,55.6,57.1,81.0,19288.6,27417,10783.2,920,28476,27969.5,40.8,55
+64,63,63,100.0,0.0,0.0,65.1,73.0,57.1,14824.0,18307,6269.3,926,19334,18655.5,31.8,36
+160,63,63,100.0,0.0,0.0,42.9,47.6,85.7,27874.7,31023,19274.9,937,47079,46976.2,58.5,68
+80,63,63,100.0,0.0,0.0,58.7,60.3,66.7,16502.8,22852,8757.9,912,23664,23211.4,34.6,46

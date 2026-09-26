@@ -65,7 +65,7 @@ llm:
   # Cette cle etait ABSENTE : core/config.py retombait alors sur son defaut
   # code en dur `llama3.2:1b`, un modele qui n'est PAS installe sur cette
   # machine. Ollama se rabattait donc sur le premier modele disponible
-  # (qwen3.5:4b, 3,4 Go) et chaque appel partait en ReadTimeout.
+  # (qwen3.5:2b, 3,4 Go) et chaque appel partait en ReadTimeout.
   model: qwen3:1.7b
 
   # Timeout d'un appel a Ollama. Etait 300 s (600 s avec les retries), soit
@@ -187,17 +187,17 @@ tasks:
 
   fast:
     providers: [ollama]
-    model: qwen3.5:4b
+    model: qwen3.5:2b
     mode: single
 
   summary:
     providers: [ollama]
-    model: qwen3.5:4b
+    model: qwen3.5:2b
     mode: single
 
   default:
     providers: [ollama]
-    model: qwen3.5:4b
+    model: qwen3.5:2b
     mode: single
 
 # ==================================================================
