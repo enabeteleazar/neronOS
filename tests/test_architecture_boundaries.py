@@ -28,7 +28,7 @@ SERVER = pathlib.Path(__file__).resolve().parents[1] / "server"
 
 # Paquets de premier niveau sous server/ traites comme des plateformes.
 PLATFORMS = {
-    "agents", "common", "core", "doctor", "goal", "integrations",
+    "agents", "common", "core", "doctor", "gateways", "goal", "integrations",
     "llm", "memory", "modules", "print", "tools", "voice",
     "watchdog",
 }

@@ -11,6 +11,7 @@ Wants=neron@goal.service
 Wants=neron@doctor.service
 Wants=neron@voice.service
 Wants=neron@print.service
+Wants=neron@gateways.service
 After=network-online.target
 
 [Install]

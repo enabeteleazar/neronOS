@@ -21,6 +21,7 @@ include = [
     "common*",
     "core*",
     "doctor*",
+    "gateways*",
     "goal*",
     "integrations*",
     "llm*",

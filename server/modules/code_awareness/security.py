@@ -15,6 +15,7 @@ ALLOWED_TOP_LEVEL_DIRS = {
     "common",
     "core",
     "doctor",
+    "gateways",
     "goal",
     "integrations",
     "llm",

@@ -37,6 +37,10 @@ nodes:
     host: 127.0.1.7
     port: 8050
 
+  gateways:
+    host: 127.0.1.8
+    port: 8070
+
   doctor:
     host: 127.0.1.9
     port: 8060

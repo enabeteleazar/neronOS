@@ -1,0 +1,76 @@
+# Registre declaratif des passerelles connues.
+#
+# Chaque entree decrit un service externe que Neron peut interroger pour un
+# ou plusieurs domaines (mail, contacts, notes, reminders, calendar, repos,
+# docs...). `credential_env` liste les variables attendues dans secrets.env
+# (jamais de secret ici) ; `connect_hint` est le texte que Neron peut
+# restituer a l'utilisateur pour expliquer comment obtenir ces identifiants.
+#
+# Ajouter un connecteur = ajouter une entree ici, pas ecrire un nouveau
+# module par service.
+
+connectors:
+  - id: google
+    name: Google
+    domains: [mail, contacts, notes, reminders, calendar]
+    protocol: rest
+    auth_type: oauth2
+    credential_env:
+      - NERON_GATEWAY_GOOGLE_CLIENT_ID
+      - NERON_GATEWAY_GOOGLE_CLIENT_SECRET
+      - NERON_GATEWAY_GOOGLE_REFRESH_TOKEN
+    connect_hint: >-
+      Cree des identifiants OAuth2 dans la console Google Cloud (active les
+      API Gmail, Calendar, Contacts et Tasks), puis renseigne les variables
+      listees dans secrets.env avant de relancer la connexion.
+
+  - id: microsoft
+    name: Microsoft (Outlook / Microsoft 365)
+    domains: [mail, contacts, calendar, reminders]
+    protocol: rest
+    auth_type: oauth2
+    credential_env:
+      - NERON_GATEWAY_MICROSOFT_CLIENT_ID
+      - NERON_GATEWAY_MICROSOFT_CLIENT_SECRET
+      - NERON_GATEWAY_MICROSOFT_REFRESH_TOKEN
+    connect_hint: >-
+      Enregistre une application dans le centre d'administration Microsoft
+      Entra avec les scopes Mail/Calendars/Contacts/Tasks de Microsoft
+      Graph, puis renseigne les variables listees dans secrets.env.
+
+  - id: apple
+    name: Apple (iCloud)
+    domains: [contacts, calendar]
+    protocol: caldav_carddav
+    auth_type: app_password
+    credential_env:
+      - NERON_GATEWAY_APPLE_ID
+      - NERON_GATEWAY_APPLE_APP_PASSWORD
+    connect_hint: >-
+      Genere un mot de passe d'application sur ton compte Apple, puis
+      renseigne ton identifiant Apple et ce mot de passe dans secrets.env.
+      Reminders et Notes ne sont pas couverts : Apple n'expose aucune API
+      cloud publique pour ces deux domaines.
+
+  - id: github
+    name: GitHub
+    domains: [repos, issues, pull_requests]
+    protocol: mcp
+    auth_type: oauth2
+    credential_env:
+      - NERON_GATEWAY_GITHUB_TOKEN
+    connect_hint: >-
+      Genere un token d'acces (fine-grained personal access token ou token
+      d'installation d'app) et renseigne NERON_GATEWAY_GITHUB_TOKEN dans
+      secrets.env.
+
+  - id: notion
+    name: Notion
+    domains: [docs, notes]
+    protocol: mcp
+    auth_type: oauth2
+    credential_env:
+      - NERON_GATEWAY_NOTION_TOKEN
+    connect_hint: >-
+      Cree une integration interne dans les parametres Notion et renseigne
+      NERON_GATEWAY_NOTION_TOKEN dans secrets.env.

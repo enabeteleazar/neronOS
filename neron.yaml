@@ -28,6 +28,11 @@ memory:
   timeout: 10
   retry: 2
 
+gateways:
+  enabled: true
+  timeout: 10
+  retry: 2
+
 # ==================================================================
 # LLM
 # ==================================================================
@@ -311,6 +316,7 @@ doctor:
     - neron@voice
     - neron@doctor
     - neron@print
+    - neron@gateways
     - ollama
 
 # Lu par server/core/config.py (SERVER_HOST/SERVER_PORT/CORS_ORIGINS).
