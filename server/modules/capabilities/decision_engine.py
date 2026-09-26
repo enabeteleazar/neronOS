@@ -8,6 +8,17 @@ from modules.capabilities.router import normalize_text
 GatewayMatch = tuple[Any, Any]  # (gateways.models.Connector, gateways.models.ConnectorState)
 GatewayLookup = Callable[[str], list[GatewayMatch]]
 
+# Domaines dont la resolution appartient au registre de passerelles
+# (server/gateways), pas a la generation dynamique d'agent/tool. Constante de
+# module (plutot que privee a DecisionEngine) : orchestrator.py doit pouvoir
+# la consulter pour decider d'envoyer une requete vers `route="resolver"|see
+# core/pipeline/orchestrator.py::_requires_specialized_resolution`, sans quoi
+# le resolver n'est jamais appele pour ces domaines et la demande tombe dans
+# le chat LLM generique.
+GATEWAY_DOMAINS = {
+    "mail", "contacts", "notes", "reminders", "calendar", "repos", "docs",
+}
+
 
 def _default_gateway_lookup(domain: str) -> list[GatewayMatch]:
     """Interroge le registre de passerelles (server/gateways) pour ce domaine.
@@ -29,13 +40,10 @@ def _default_gateway_lookup(domain: str) -> list[GatewayMatch]:
 class DecisionEngine:
     _OPERATIONAL_DOMAINS = {"logs", "backups", "sqlite", "systemd"}
 
-    # Domaines dont la resolution appartient au registre de passerelles
-    # (server/gateways), pas a la generation dynamique d'agent/tool. Un
-    # domaine present ici mais sans connecteur couvrant (encore) le domaine
-    # produit explicitement "aucune passerelle", jamais un agent auto-genere.
-    _GATEWAY_DOMAINS = {
-        "mail", "contacts", "notes", "reminders", "calendar", "repos", "docs",
-    }
+    # Un domaine present ici mais sans connecteur couvrant (encore) le
+    # domaine produit explicitement "aucune passerelle", jamais un agent
+    # auto-genere. Voir la constante de module GATEWAY_DOMAINS ci-dessus.
+    _GATEWAY_DOMAINS = GATEWAY_DOMAINS
 
     def __init__(self, *, gateway_lookup: GatewayLookup | None = None) -> None:
         self._gateway_lookup = gateway_lookup or _default_gateway_lookup

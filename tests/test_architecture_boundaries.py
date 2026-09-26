@@ -57,7 +57,12 @@ BASELINE: dict[str, int] = {
     # par tests/test_core_does_not_serve_goal.py.
     "core->goal": 21,
     "core->integrations": 1,
-    "core->modules": 30,
+    # +3 (30 -> 33) : orchestrator.py et app.py consultent
+    # modules.capabilities (DomainClassifier, GATEWAY_DOMAINS, le vrai
+    # CapabilityResolver) pour router les domaines externes vers le
+    # registre de passerelles (server/gateways). Couplage volontaire, cf.
+    # modules->gateways plus haut.
+    "core->modules": 33,
     "core->tools": 2,
     "doctor->common": 3,
     "goal->agents": 3,

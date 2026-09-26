@@ -39,6 +39,21 @@ EXPECTED_DECISION_KEYS = {
         ("Analyse cette demande complexe", "goal_engine"),
         ("/goal cree un agent meteo", "goal_engine"),
         ("/help", "help_provider"),
+        # Domaines externes portes par le registre de passerelles
+        # (server/gateways) : doivent atteindre le resolver, jamais tomber
+        # dans le chat LLM generique. Regression du 26/09/2026 — ces
+        # domaines existaient deja dans modules.capabilities.rules mais
+        # _requires_specialized_resolution ne les reconnaissait pas encore,
+        # donc route="llm_provider" et une reponse hallucinee au lieu du
+        # routage passerelle.
+        ("Ouvre mon repo", "resolver"),
+        ("Montre mes mails", "resolver"),
+        ("Montre mes contacts", "resolver"),
+        ("Montre mes notes", "resolver"),
+        ("Montre mes rappels", "resolver"),
+        ("Ouvre mon calendrier", "resolver"),
+        ("Montre la pull request", "resolver"),
+        ("Ouvre ma page Notion", "resolver"),
     ],
 )
 async def test_core_orchestrator_is_the_single_route_authority(
@@ -138,6 +153,51 @@ async def test_planner_is_not_consulted_during_route_decision(monkeypatch):
     )
 
     assert decision.selected_route == "goal_engine"
+
+
+@pytest.mark.asyncio
+async def test_gateway_domain_request_reaches_the_resolver_not_the_llm(monkeypatch):
+    """Non-regression : cf. les cas 'resolver' ajoutes au test parametrise
+    ci-dessus. Verifie ici que le pipeline complet (`handle`) invoque bien
+    le resolver et renvoie sa reponse, au lieu de tomber dans le chat LLM
+    generique comme observe en production le 26/09/2026."""
+
+    class ForbiddenAgentRouter:
+        async def route(self, *_args, **_kwargs):
+            raise AssertionError("Une demande de passerelle ne doit pas utiliser le LLM/agent router")
+
+    class StubResolver:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def resolve(self, request):
+            self.calls.append(request.text)
+            from modules.capabilities.models import CapabilityDecision, CapabilityResult
+
+            return CapabilityResult(
+                status="action_required",
+                response="Je peux me connecter a GitHub pour ca.",
+                decision=CapabilityDecision(
+                    decision="propose_gateway_connection",
+                    confidence=0.95,
+                    reason="test",
+                    capability_type="gateway",
+                    gateway_connector_id="github",
+                    domain="repos",
+                ),
+            )
+
+    resolver = StubResolver()
+    orchestrator = CoreOrchestrator(
+        agent_router=ForbiddenAgentRouter(),
+        capability_resolver=resolver,
+    )
+
+    result = await orchestrator.handle("Ouvre mon repo")
+
+    assert result.decision.selected_route == "resolver"
+    assert resolver.calls == ["Ouvre mon repo"]
+    assert result.response == "Je peux me connecter a GitHub pour ca."
 
 
 @pytest.mark.asyncio
