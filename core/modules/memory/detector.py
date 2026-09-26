@@ -188,4 +188,43 @@ def detect_memory_intent(text: str) -> dict:
     if re.fullmatch(r"qui est [a-z][a-z0-9' ]*", value):
         return {"matched": True, "kind": "recall", "confidence": 0.85}
 
+    if _question_personnelle(value):
+        return {"matched": True, "kind": "recall", "confidence": 0.75}
+
     return {"matched": False, "kind": None, "confidence": 0.0}
+
+
+# ── Filet generique pour les questions personnelles ────────────────────
+# Les regles ci-dessus reconnaissent des FORMULATIONS precises. Elles
+# couvrent « quel est mon metier ? » mais laissaient passer « quel velo
+# est-ce que je possede ? », qui partait alors dans le LLM conversationnel
+# et restait sans reponse pendant 60 s (mesure du 07/09/2026) alors que
+# l'information etait en memoire.
+#
+# Impossible d'enumerer toutes les tournures. Le discriminant utile n'est
+# pas la formulation mais la PERSONNE : une question qui parle de
+# l'utilisateur a la premiere personne interroge sa memoire ; une question
+# generale n'a aucun marqueur de premiere personne.
+
+_INTERROGATIF = re.compile(_pat(
+    r"^(qui|que|qu|quel|quelle|quels|quelles|quand|ou|comment|combien|"
+    r"est ce que|qu est ce que)\b"
+))
+
+# `mon|ma|mes|je|j` seulement. Volontairement PAS `moi` ni `me` : « explique
+# moi Docker » est une demande d'explication generale, pas une question sur
+# l'utilisateur.
+_PREMIERE_PERSONNE = re.compile(r"\b(mon|ma|mes|je|j)\b")
+
+# Une demande d'action ou de permission n'interroge pas la memoire :
+# « est-ce que je peux redemarrer le service ? » n'est pas un souvenir.
+_DEMANDE_ACTION = re.compile(r"\b(peux|peut|dois|faut|veux|pourrais|puis)\b")
+
+
+def _question_personnelle(value: str) -> bool:
+    """Question interrogative portant sur l'utilisateur lui-meme."""
+    if not _INTERROGATIF.match(value):
+        return False
+    if _DEMANDE_ACTION.search(value):
+        return False
+    return bool(_PREMIERE_PERSONNE.search(value))

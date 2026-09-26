@@ -525,21 +525,31 @@ class CoreOrchestrator:
         query = query.strip()
         normalized_query = _normalize(query)
 
-        # Le message brut part en memoire AVANT le routage : toutes les routes
-        # sont couvertes, pas seulement llm_provider. Attente courte et
-        # fail-open, comme _fetch_memory_context.
-        if query:
+        decision, intent_result = await self.decide(
+            query,
+            explicit_route=explicit_route,
+        )
+
+        # UNE seule chaine de memorisation par message.
+        #
+        # L'observation partait AVANT le routage, pour toutes les routes. Un
+        # « Retiens que mon velo est un Decathlon Riverside. » declenchait
+        # donc les deux chaines a la fois : /memory/observe (juge LLM) ET
+        # /memory/remember (extraction deterministe). Mesure le 08/09/2026 :
+        # un seul message produisait deux enregistrements bruts et trois
+        # faits, dont `habite_a = Riverside` — la marque du velo promue au
+        # rang de domicile.
+        #
+        # Quand le message part vers la route memoire, elle fait deja le
+        # travail — ecriture deterministe ou lecture seule. On ne l'observe
+        # donc pas en plus.
+        if query and not _memoire_deja_saisie(query, decision):
             try:
                 await asyncio.wait_for(
                     self._send_to_oblivia_observe(query), timeout=3.0
                 )
             except (asyncio.TimeoutError, Exception):
                 logger.warning("memory_write_failed", exc_info=True)
-
-        decision, intent_result = await self.decide(
-            query,
-            explicit_route=explicit_route,
-        )
 
         if decision.requires_governor:
             governor = self._get_runtime_governor()
@@ -1890,6 +1900,25 @@ def _extract_memory_remember_content(query: str) -> str:
             return remainder
 
     return normalized
+
+
+def _memoire_deja_saisie(query: str, decision: OrchestratorDecision) -> bool:
+    """Le message est-il deja pris en charge par la route memoire ?
+
+    Deux cas, pour deux raisons distinctes :
+
+    - ECRITURE (`remember`) : la route extrait deja le fait, de maniere
+      deterministe. Observer en plus declenchait la seconde chaine
+      d'extraction et produisait des representations concurrentes.
+
+    - LECTURE (`recall`, `search`) : une question ne doit rien apprendre.
+      Pire, observer la stockait AVANT que la recherche ne s'execute, si
+      bien que la question se retrouvait elle-meme dans sa propre reponse :
+      « Je n'ai pas de fiche la-dessus, mais tu m'as dit : "Quel est le nom
+      de mon ancien collegue ?" ». La question polluait son propre resultat.
+    """
+    del query
+    return decision.selected_route == "memory_provider"
 
 
 def _memory_provider_action(
