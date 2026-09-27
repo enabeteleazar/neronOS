@@ -14,20 +14,30 @@ homebox.tail7f8e60.ts.net {
 		reverse_proxy 127.0.0.1:4100
 	}
 
+	# Authorization injectee ici, jamais par les clients navigateur (le
+	# Dashboard ne livre plus NERON_API_KEY dans son bundle JS). Necessite
+	# NERON_API_KEY dans l'environnement du service caddy (cf. notes de
+	# deploiement) — sans ca, {$NERON_API_KEY} est vide et le Core renvoie 401.
 	handle_path /api/* {
-		reverse_proxy 127.0.0.1:8010
+		reverse_proxy 127.0.0.1:8010 {
+			header_up Authorization "Bearer {$NERON_API_KEY}"
+		}
 	}
 
 	handle_path /ws/* {
 		reverse_proxy 127.0.0.1:18789
 	}
 
+	# STT volontairement non authentifie (deja le cas cote client avant ce
+	# changement) : microservice sans acces aux capacites sensibles du Core.
 	handle_path /stt/* {
 		reverse_proxy 127.0.1.5:8045
 	}
 
 	handle_path /memoire/* {
-		reverse_proxy 127.0.1.4:8040
+		reverse_proxy 127.0.1.4:8040 {
+			header_up Authorization "Bearer {$NERON_API_KEY}"
+		}
 	}
 
 	handle {
