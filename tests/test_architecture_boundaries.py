@@ -41,7 +41,10 @@ BASELINE: dict[str, int] = {
     "agents->common": 10,
     "agents->core": 29,
     "agents->goal": 7,
-    "agents->integrations": 2,
+    # +2 (2 -> 4) : agents/builtin/automation/pc_remote_agent.py importe
+    # integrations.pc_remote.errors et .service, meme motif que ha_agent.py
+    # (2 sites deja presents pour integrations.homeassistant).
+    "agents->integrations": 4,
     "agents->llm": 4,
     "agents->modules": 26,
     "agents->tools": 4,
@@ -56,7 +59,11 @@ BASELINE: dict[str, int] = {
     # importlib.import_module(<chaine>), invisible en AST. Il est verrouille
     # par tests/test_core_does_not_serve_goal.py.
     "core->goal": 21,
-    "core->integrations": 1,
+    # +1 (1 -> 2) : orchestrator.py::_detect_pc_remote_action importe
+    # integrations.pc_remote.config.load_devices pour matcher les devices
+    # declares avant le faux-positif system_status (meme motif que
+    # gateway_domain juste en dessous, memes lignes).
+    "core->integrations": 2,
     # +3 (30 -> 33) : orchestrator.py et app.py consultent
     # modules.capabilities (DomainClassifier, GATEWAY_DOMAINS, le vrai
     # CapabilityResolver) pour router les domaines externes vers le
@@ -72,7 +79,10 @@ BASELINE: dict[str, int] = {
     "goal->modules": 3,
     "integrations->common": 2,
     "integrations->core": 1,
-    "integrations->tools": 1,
+    # +1 (1 -> 2) : integrations/pc_remote/tool.py importe ToolResult/ToolSpec
+    # depuis tools.models, meme motif que integrations/homeassistant/tool.py.
+    # Couplage volontaire, meme nature que integrations->core (provider.py).
+    "integrations->tools": 2,
     "llm->common": 5,
     # Phase 2F : llm->core retire (etait 2). Les contrats de providers
     # (models, protocol) vivent desormais dans server/common/providers : le
@@ -93,7 +103,10 @@ BASELINE: dict[str, int] = {
     "tools->agents": 1,
     "tools->common": 5,
     "tools->core": 1,
-    "tools->integrations": 2,
+    # +2 (2 -> 4) : tools/runtime.py enregistre le tool pc_remote (handler +
+    # tool_spec) exactement comme le tool homeassistant. Couplage volontaire,
+    # meme motif que les 2 sites homeassistant deja presents.
+    "tools->integrations": 4,
     "tools->modules": 10,
     "voice->agents": 2,
     "voice->common": 2,

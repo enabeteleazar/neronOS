@@ -49,12 +49,17 @@ class ToolRuntime:
             HOMEASSISTANT_TOOL_SLUG,
             execute as execute_homeassistant,
         )
+        from integrations.pc_remote.tool import (
+            PC_REMOTE_TOOL_SLUG,
+            execute as execute_pc_remote,
+        )
 
         self.handlers: dict[str, ToolHandler] = {
             "neron_log_reader_tool": self._read_logs,
             "neron_log_error_filter_tool": self._filter_errors,
             "neron_log_summary_tool": self._summarize_errors,
             HOMEASSISTANT_TOOL_SLUG: execute_homeassistant,
+            PC_REMOTE_TOOL_SLUG: execute_pc_remote,
             **(handlers or {}),
         }
         self._ensure_builtin_tools()
@@ -67,9 +72,15 @@ class ToolRuntime:
             HOMEASSISTANT_TOOL_SLUG,
             tool_spec as homeassistant_tool_spec,
         )
+        from integrations.pc_remote.tool import (
+            PC_REMOTE_TOOL_SLUG,
+            tool_spec as pc_remote_tool_spec,
+        )
 
         if self.registry.get_tool(HOMEASSISTANT_TOOL_SLUG) is None:
             self.registry.register_tool(homeassistant_tool_spec())
+        if self.registry.get_tool(PC_REMOTE_TOOL_SLUG) is None:
+            self.registry.register_tool(pc_remote_tool_spec())
 
     async def execute_tool(
         self,

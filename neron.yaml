@@ -220,6 +220,31 @@ home_assistant:
   sync_interval: 60
 
 # ==================================================================
+# PC REMOTE (controle d'un PC distant via l'agent pc_remote, tailnet)
+# ==================================================================
+# Registre declaratif des PC pilotables. Aucun secret ici : chaque device
+# reference un `token_env` resolu depuis secrets.env. `url` doit pointer sur
+# l'IP/nom Tailscale de la machine (jamais une IP publique), et `apps` est
+# purement informatif cote Neron : l'allowlist qui fait foi vit sur l'agent,
+# sur la machine distante.
+pc_remote:
+  enabled: true
+  # Agent Windows (client/pcRemote/windows/) et agent Ubuntu
+  # (client/pcRemote/linux/) exposent le meme protocole HTTP, donc le meme
+  # tool `pc_remote` cote Neron pilote indifferemment les deux.
+  devices:
+    - id: serveur_ubuntu
+      name: "Serveur Ubuntu"
+      url: "http://100.90.194.109:8765"
+      token_env: PC_REMOTE_SERVEUR_UBUNTU_TOKEN
+      apps: [htop]
+    - id: pc_windows
+      name: "PC Windows"
+      url: "http://100.123.86.77:8765"
+      token_env: PC_REMOTE_PC_WINDOWS_TOKEN
+      apps: [chrome, notepad]
+
+# ==================================================================
 # STT
 # ==================================================================
 
