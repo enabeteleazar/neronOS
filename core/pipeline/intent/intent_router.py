@@ -23,6 +23,7 @@ class Intent(str, Enum):
     STATUS_SMALLTALK     = "status_smalltalk"
     WEB_SEARCH           = "web_search"
     HA_ACTION            = "ha_action"
+    PC_REMOTE            = "pc_remote_action"
     TIME_QUERY           = "time_query"
     PERSONALITY_FEEDBACK = "personality_feedback"
     CODE                 = "code"

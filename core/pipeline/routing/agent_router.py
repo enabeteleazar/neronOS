@@ -24,6 +24,7 @@ _llm: Optional[object] = None
 _memory: Optional[object] = None
 _system: Optional[object] = None
 _ha: Optional[object] = None
+_pc_remote: Optional[object] = None
 _web: Optional[object] = None
 _news: Optional[object] = None
 _weather: Optional[object] = None
@@ -130,6 +131,16 @@ def _get_web():
         WebAgent = _external_agents.agent_class("agents.builtin.communication.web_agent", "WebAgent")
         _web = WebAgent()
     return _web
+
+
+def _get_pc_remote():
+    global _pc_remote
+    if _pc_remote is None:
+        PCRemoteAgent = _external_agents.agent_class(
+            "agents.builtin.automation.pc_remote_agent", "PCRemoteAgent"
+        )
+        _pc_remote = PCRemoteAgent()
+    return _pc_remote
 
 
 def _get_news():
@@ -826,6 +837,10 @@ class AgentRouter:
 
         if intent == Intent.HA_ACTION:
             result = await _get_ha().execute(query)
+            return _result_to_text(result)
+
+        if intent == Intent.PC_REMOTE:
+            result = await _get_pc_remote().execute(query)
             return _result_to_text(result)
 
         if intent == Intent.WEB_SEARCH:
