@@ -182,6 +182,9 @@ class Config:
     MEMORY_RETENTION = int(_get(_cfg, "memory", "retention_days",         default=30))
     MEMORY_MAX_ROWS  = int(_get(_cfg, "memory", "max_rows",               default=10_000))
 
+    # ── Météo ─────────────────────────────────────────────────────────────
+    WEATHER_DEFAULT_CITY = _get(_cfg, "weather", "default_city", fallback_env="WEATHER_DEFAULT_CITY", default="Paris")
+
     # ── SearXNG ───────────────────────────────────────────────────────────
     SEARXNG_URL         = _get(_cfg, "searxng", "url",         fallback_env="SEARXNG_URL",          default="http://localhost:8080")
     SEARXNG_TIMEOUT     = float(_get(_cfg, "searxng", "timeout",   fallback_env="SEARXNG_TIMEOUT",    default=10.0))
