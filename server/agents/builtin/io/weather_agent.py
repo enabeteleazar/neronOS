@@ -1,19 +1,27 @@
 """core/agents/io/weather_agent.py
-Neron Core — Agent Météo  v1.1.0
+Neron Core — Agent Météo  v1.2.0
 
 Inspiré de helpers.py (JARVIS) — météo temps réel via Open-Meteo (100 % gratuit,
 sans clé API) + géocodage via Nominatim (OpenStreetMap).
 
+Quand la query ne nomme aucune ville, l'agent se géolocalise lui-même via son
+IP publique (ipapi.co, gratuit, sans clé) plutôt que de retomber directement
+sur une ville par défaut fixe. Le résultat de géolocalisation est mis en
+cache le temps du process : l'IP du serveur ne change pas d'une requête à
+l'autre, inutile de re-frapper le service à chaque « météo ? ».
+
 Intent déclenché : WEATHER_QUERY
 Commandes Telegram : /meteo [ville]
 
-Config optionnelle dans neron.yaml :
-  WEATHER_DEFAULT_CITY: "Paris"   # défaut si aucune ville dans la query
+Config dans neron.yaml (section `weather:`) :
+  default_city: "Paris"   # repli si la ville n'est pas précisée ET que la
+                           # géolocalisation IP échoue
 """
 from __future__ import annotations
 
 import logging
 import re
+import time
 from typing import Optional
 
 import httpx
@@ -26,8 +34,10 @@ logger = logging.getLogger("agent.weather")
 
 _DEFAULT_CITY = getattr(settings, "WEATHER_DEFAULT_CITY", "Paris")
 
-_GEOCODE_URL  = "https://nominatim.openstreetmap.org/search"
-_WEATHER_URL  = "https://api.open-meteo.com/v1/forecast"
+_GEOCODE_URL   = "https://nominatim.openstreetmap.org/search"
+_WEATHER_URL   = "https://api.open-meteo.com/v1/forecast"
+_LOCATE_URL    = "https://ipapi.co/json/"
+_LOCATE_CACHE_TTL = 3600.0  # secondes — l'IP du serveur ne bouge pas souvent
 
 # Codes WMO → description + emoji
 _WMO_CODES: dict[int, tuple[str, str]] = {
@@ -56,21 +66,23 @@ _WMO_CODES: dict[int, tuple[str, str]] = {
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _extract_city(query: str) -> str:
-    """Tente d'extraire une ville de la query.
+def _extract_city(query: str) -> Optional[str]:
+    """Tente d'extraire une ville explicitement nommée dans la query.
 
     Exemples couverts :
       'météo à Lyon'                     → Lyon
       'quel temps fait-il à Marseille'   → Marseille
       'il fait combien à Nice'           → Nice
       'météo Paris'                      → Paris
-      'il fait combien'                  → _DEFAULT_CITY
+      'il fait combien'                  → None (pas de ville → auto-localisation)
     """
     patterns = [
         # "météo à Lyon", "météo de Paris"
         r"(?:météo|meteo|température|temperature)\s+(?:à|a|de|sur|pour)\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s\-]*?)(?:\s*\?|$)",
         # "quel temps fait-il à Marseille", "il fait combien à Nice"
-        r"(?:à|a)\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s\-]{2,})(?:\s*[?]|$)",
+        # \b avant (à|a) : sans lui, le "a" final de "la" (ex. "la météo ?")
+        # matchait et renvoyait "météo" comme fausse ville.
+        r"\b(?:à|a)\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s\-]{2,})(?:\s*[?]|$)",
         # "météo Lyon" (sans préposition)
         r"(?:météo|meteo)\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s\-]{2,})(?:\s*[?]|$)",
     ]
@@ -80,7 +92,7 @@ def _extract_city(query: str) -> str:
             city = m.group(1).strip().rstrip("?").strip()
             if 2 < len(city) < 50:
                 return city
-    return _DEFAULT_CITY
+    return None
 
 
 async def _geocode(city: str) -> tuple[float, float]:
@@ -97,6 +109,42 @@ async def _geocode(city: str) -> tuple[float, float]:
         if not data:
             raise ValueError(f"Ville introuvable : {city}")
         return float(data[0]["lat"]), float(data[0]["lon"])
+
+
+# Cache process-local du dernier résultat de géolocalisation IP.
+_locate_cache: Optional[tuple[float, float, str]] = None
+_locate_cache_ts: float = 0.0
+
+
+async def _locate_self() -> tuple[float, float, str]:
+    """Géolocalise le serveur via son IP publique (ipapi.co, gratuit, sans clé).
+
+    Retourne (lat, lon, ville). Résultat mis en cache _LOCATE_CACHE_TTL
+    secondes pour éviter une requête externe à chaque question sans ville.
+    """
+    global _locate_cache, _locate_cache_ts
+
+    now = time.monotonic()
+    if _locate_cache is not None and (now - _locate_cache_ts) < _LOCATE_CACHE_TTL:
+        return _locate_cache
+
+    async with httpx.AsyncClient(
+        timeout=5.0,
+        headers={"User-Agent": "Neron-Assistant/1.0 (homebox self-hosted)"},
+    ) as client:
+        r = await client.get(_LOCATE_URL)
+        r.raise_for_status()
+        data = r.json()
+        if data.get("error"):
+            raise ValueError(data.get("reason", "Géolocalisation IP indisponible"))
+
+        lat = float(data["latitude"])
+        lon = float(data["longitude"])
+        city = data.get("city") or _DEFAULT_CITY
+
+    _locate_cache = (lat, lon, city)
+    _locate_cache_ts = now
+    return _locate_cache
 
 
 async def _fetch_weather(lat: float, lon: float) -> dict:
@@ -140,15 +188,25 @@ def _format_weather(data: dict, city: str) -> str:
 
 class WeatherAgent:
     """
-    Retourne la météo actuelle pour une ville.
+    Retourne la météo actuelle pour une ville, ou pour la position du
+    serveur (auto-localisation IP) si aucune ville n'est précisée.
     Utilise Open-Meteo (gratuit, sans clé) + Nominatim pour le géocodage.
     """
 
     async def run(self, query: str = "") -> str:
         city = _extract_city(query)
         try:
-            lat, lon = await _geocode(city)
-            data     = await _fetch_weather(lat, lon)
+            if city:
+                lat, lon = await _geocode(city)
+            else:
+                try:
+                    lat, lon, city = await _locate_self()
+                except Exception as e:
+                    logger.warning("Auto-localisation impossible, repli sur %s : %s", _DEFAULT_CITY, e)
+                    city = _DEFAULT_CITY
+                    lat, lon = await _geocode(city)
+
+            data = await _fetch_weather(lat, lon)
             return _format_weather(data, city)
 
         except ValueError as e:
