@@ -47,3 +47,6 @@
 	path = server/gateways
 	url = git@github.com:enabeteleazar/neronGateways.git
 	branch = develop
+[submodule "client/pcRemote"]
+	path = client/pcRemote
+	url = git@github.com:enabeteleazar/neronRemote.git
