@@ -185,6 +185,17 @@ class Config:
     # ── Météo ─────────────────────────────────────────────────────────────
     WEATHER_DEFAULT_CITY = _get(_cfg, "weather", "default_city", fallback_env="WEATHER_DEFAULT_CITY", default="Paris")
 
+    # ── Shopping (neronShop) ─────────────────────────────────────────────
+    SHOP_DB_PATH        = NERON_DIR / _get(_cfg, "shop", "db_path",          default="data/shop.db")
+    SHOP_HEADLESS       = str(_get(_cfg, "shop", "headless",     fallback_env="SHOP_HEADLESS",     default=True)).lower() != "false"
+    SHOP_USER_DATA_DIR  = NERON_DIR / _get(_cfg, "shop", "user_data_dir",    default="data/shop_browser_profile")
+    SHOP_NAV_TIMEOUT_MS = int(_get(_cfg, "shop", "nav_timeout_ms", fallback_env="SHOP_NAV_TIMEOUT_MS", default=15000))
+    SHOP_MAX_CANDIDATES = int(_get(_cfg, "shop", "max_candidates",                                     default=8))
+    # Session Amazon authentifiée (optionnelle) : fichier storage_state Playwright
+    # généré côté client par system/scripts/shop_export_amazon_session.py — jamais
+    # de mot de passe stocké ici, uniquement des cookies de session déjà validés.
+    SHOP_STORAGE_STATE_PATH = NERON_DIR / _get(_cfg, "shop", "storage_state_path", default="data/shop_amazon_state.json")
+
     # ── SearXNG ───────────────────────────────────────────────────────────
     SEARXNG_URL         = _get(_cfg, "searxng", "url",         fallback_env="SEARXNG_URL",          default="http://localhost:8080")
     SEARXNG_TIMEOUT     = float(_get(_cfg, "searxng", "timeout",   fallback_env="SEARXNG_TIMEOUT",    default=10.0))

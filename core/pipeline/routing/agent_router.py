@@ -30,6 +30,7 @@ _news: Optional[object] = None
 _weather: Optional[object] = None
 _todo: Optional[object] = None
 _wiki: Optional[object] = None
+_shop: Optional[object] = None
 
 AGENT_LIST_QUERIES = {
     "quels agents sont disponibles",
@@ -173,6 +174,14 @@ def _get_wiki():
         WikiAgent = _external_agents.agent_class("agents.builtin.io.wiki_agent", "WikiAgent")
         _wiki = WikiAgent()
     return _wiki
+
+
+def _get_shop():
+    global _shop
+    if _shop is None:
+        ShopAgent = _external_agents.agent_class("agents.builtin.io.shop_agent", "ShopAgent")
+        _shop = ShopAgent()
+    return _shop
 
 
 def _get_self_model():
@@ -829,6 +838,10 @@ class AgentRouter:
 
         if intent == Intent.WIKI_QUERY:
             result = await _get_wiki().run(query)
+            return _result_to_text(result)
+
+        if intent == Intent.SHOPPING_REQUEST:
+            result = await _get_shop().run(query)
             return _result_to_text(result)
 
         if intent == Intent.TIME_QUERY:

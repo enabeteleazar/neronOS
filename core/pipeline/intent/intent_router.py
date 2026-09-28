@@ -53,6 +53,7 @@ class Intent(str, Enum):
     WEATHER_QUERY        = "weather_query"
     TODO_ACTION          = "todo_action"
     WIKI_QUERY           = "wiki_query"
+    SHOPPING_REQUEST     = "shopping_request"
 
 
 @dataclass
@@ -171,6 +172,11 @@ _WEATHER_KEYWORDS = [
     "previsions meteo",
 ]
 _NEWS_KEYWORDS = ["actualite", "actualites", "news", "infos du jour", "information du jour"]
+_SHOPPING_KEYWORDS = [
+    "achete moi", "achete nous", "commande moi", "commande nous",
+    "trouve moi un", "trouve moi une", "cherche moi un", "cherche moi une",
+    "prends moi un", "prends moi une",
+]
 _CODE_AUDIT_KEYWORDS = [
     "audit ce code", "audite ce code", "analyse ce code", "analyse ton code",
     "analyse le code", "inspecte ton code", "audite ton code",
@@ -260,6 +266,8 @@ def _keyword_fallback_intent(query: str) -> Intent | None:
         return Intent.WEATHER_QUERY
     if any(k in q for k in _NEWS_KEYWORDS):
         return Intent.NEWS_QUERY
+    if any(k in q for k in _SHOPPING_KEYWORDS):
+        return Intent.SHOPPING_REQUEST
     if any(k in q for k in _CODE_AUDIT_KEYWORDS):
         return Intent.CODE_AUDIT
     if any(k in q for k in _CODE_KEYWORDS):

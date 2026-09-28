@@ -134,6 +134,7 @@ _OPTIONAL_ROUTER_SPECS = [
     ("critic_history", "core.api.critic_history_routes", True),
     ("planner", "core.api.planner_routes", False),
     ("notify", "core.api.notify_routes", False),
+    ("shop_live", "core.api.shop_live_routes", False),
 ]
 # Phase 2E : `goal.goals.routes` et `goal.projects.routes` ont ete retires.
 # Core ne sert pas Goal. Les monter ici faisait tourner le code de Goal DANS le
@@ -722,6 +723,11 @@ for router, kwargs in [
     (globals().get("evolution_router"), {}),
     (globals().get("memory_router"), {"dependencies": _INTERNAL_AUTH}),
     (globals().get("knowledge_router"), {"dependencies": _INTERNAL_AUTH}),
+    # Pas de _INTERNAL_AUTH ici : le router mélange REST (Depends déjà posé
+    # par route) et WebSocket (Depends(Request) incompatible avec une
+    # poignée de main WS -- authentification par en-tête Authorization lu
+    # manuellement, voir shop_live_routes._check_ws_auth).
+    (globals().get("shop_live_router"), {}),
 ]:
     _include_router_once(app, router, **kwargs)
 
