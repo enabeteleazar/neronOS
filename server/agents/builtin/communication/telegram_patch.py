@@ -16,11 +16,13 @@
 # from agents.builtin.io.weather_agent import WeatherAgent
 # from agents.builtin.core.todo_agent  import TodoAgent
 # from agents.builtin.io.wiki_agent    import WikiAgent
+# from agents.builtin.io.shop_agent    import ShopAgent
 #
 # _news_agent    = NewsAgent()
 # _weather_agent = WeatherAgent()
 # _todo_agent    = TodoAgent()
 # _wiki_agent    = WikiAgent()
+# _shop_agent    = ShopAgent()
 #
 # ─────────────────────────────────────────────────────────────────────────────
 # COMMANDES À ENREGISTRER dans _register_handlers() :
@@ -84,6 +86,16 @@ async def cmd_wiki(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(reply, parse_mode="Markdown", disable_web_page_preview=True)
 
 
+# ── /shop <demande> ──────────────────────────────────────────────────────────
+
+async def cmd_shop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Achat assisté Amazon.fr. Ex: /shop achète-moi un câble USB-C 2m, budget max 15€"""
+    from agents.builtin.io.shop_agent import ShopAgent
+    args  = " ".join(context.args) if context.args else ""
+    reply = await ShopAgent().run(args)
+    await update.message.reply_text(reply, parse_mode="Markdown", disable_web_page_preview=True)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # ENREGISTREMENT — à ajouter dans _register_handlers() :
 # ─────────────────────────────────────────────────────────────────────────────
@@ -93,3 +105,4 @@ async def cmd_wiki(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 #   application.add_handler(CommandHandler("meteo", cmd_meteo))
 #   application.add_handler(CommandHandler("todo",  cmd_todo))
 #   application.add_handler(CommandHandler("wiki",  cmd_wiki))
+#   application.add_handler(CommandHandler("shop",  cmd_shop))

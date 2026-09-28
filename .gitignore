@@ -74,6 +74,12 @@ tmp/
 runtime_data/
 tmp/runtime/
 
+# neronShop : export de session Amazon (cookies) — jamais de mot de passe,
+# mais à traiter comme un secret quand même. Ne doit jamais être commité,
+# où qu'il atterrisse (data/ est déjà ignoré ; règle défensive si généré
+# ailleurs, ex. à côté de system/scripts/shop_export_amazon_session.py).
+shop_amazon_state.json
+
 # modèles LLM locaux (très lourd)
 models/
 ollama/
