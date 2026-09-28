@@ -59,7 +59,7 @@ async def test_selfmodel_exposes_internal_truth_sources(monkeypatch):
     assert responses["architecture"].json()["self_awareness"] == "self_model"
 
 
-async def test_open_meteo_is_a2a_agent_and_never_a_provider(monkeypatch):
+async def test_pc_remote_agent_is_a2a_agent_and_never_a_provider(monkeypatch):
     ensure_default_providers()
     monkeypatch.setattr(core_app.settings, "API_KEY", "selfmodel-test-key")
     transport = httpx.ASGITransport(app=core_app.app)
@@ -71,10 +71,10 @@ async def test_open_meteo_is_a2a_agent_and_never_a_provider(monkeypatch):
         providers = (await client.get("/selfmodel/providers")).json()
         agents = (await client.get("/selfmodel/agents")).json()
 
-    assert "open_meteo" not in {item["id"] for item in providers["providers"]}
+    assert "pc_remote_agent" not in {item["id"] for item in providers["providers"]}
     provider_names = {item["id"] for item in providers["providers"]}
     agent_ids = {item["id"] for item in agents["agents"]}
-    assert "open_meteo" in agent_ids
+    assert "pc_remote_agent" in agent_ids
     assert provider_names.isdisjoint(agent_ids)
     assert all(
         item["type"] in {"llm", "memory", "homeassistant", "goal", "doctor"}
@@ -86,9 +86,9 @@ async def test_open_meteo_is_a2a_agent_and_never_a_provider(monkeypatch):
         and item["current_task"] is None
         for item in agents["agents"]
     )
-    open_meteo = next(item for item in agents["agents"] if item["id"] == "open_meteo")
-    assert open_meteo["metadata"]["capabilities"]
-    assert provider_registry.get("open_meteo") is None
+    pc_remote_agent = next(item for item in agents["agents"] if item["id"] == "pc_remote_agent")
+    assert pc_remote_agent["metadata"]["capabilities"]
+    assert provider_registry.get("pc_remote_agent") is None
 
 
 async def test_selfmodel_architecture_documents_strict_separation(monkeypatch):

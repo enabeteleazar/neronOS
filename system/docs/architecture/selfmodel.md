@@ -59,7 +59,7 @@ Le SelfModel agrège en lecture :
 
 Il n'appelle directement ni `systemctl`, ni SQLite, ni Obsidian, ni Ollama.
 
-`open_meteo` est un agent A2A et apparaît exclusivement dans
+`pc_remote_agent` est un agent A2A et apparaît exclusivement dans
 `/selfmodel/agents`. Il ne fait pas partie du Provider Registry. Les providers
 actuels exposés par `/selfmodel/providers` sont `oblivia` et `llm`.
 
