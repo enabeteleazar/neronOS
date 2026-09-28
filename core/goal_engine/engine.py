@@ -515,7 +515,7 @@ def _select_agent_from_selfmodel(
             ranked.append((score, str(agent.get("agent_id") or "")))
     if not ranked:
         return None
-    ranked.sort(key=lambda item: (-item[0], item[1] != "open_meteo", item[1]))
+    ranked.sort(key=lambda item: (-item[0], item[1]))
     return ranked[0][1] or None
 
 

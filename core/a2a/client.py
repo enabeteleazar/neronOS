@@ -96,13 +96,4 @@ class A2AClient:
         }
 
 
-a2a_client = A2AClient(
-    agents=[
-        AgentCard(
-            agent_id="local_mock",
-            name="Local Mock Agent",
-            capabilities=["health", "send_task"],
-            status="available",
-        )
-    ]
-)
+a2a_client = A2AClient()

@@ -435,7 +435,7 @@ def _extract_agent_management_slug(query: str, verbs: tuple[str, ...]) -> str | 
 async def _enable_agent(query: str) -> str:
     slug = _extract_agent_management_slug(query, ("active", "activer", "r[ée]active", "r[ée]activer"))
     if not slug:
-        return "Demande incomplète. Exemple : active agent monitoring_agent"
+        return "Demande incomplète. Exemple : active agent pc_remote_agent"
 
     from core.modules.self_model.agents_write import set_agent_status
 
@@ -451,7 +451,7 @@ async def _disable_agent(query: str) -> str:
         query, ("d[ée]sactive", "d[ée]sactiver", "stoppe", "stopper", "arr[êe]te", "arr[êe]ter")
     )
     if not slug:
-        return "Demande incomplète. Exemple : désactive agent monitoring_agent"
+        return "Demande incomplète. Exemple : désactive agent pc_remote_agent"
 
     from core.modules.self_model.agents_write import set_agent_status
 
@@ -472,11 +472,11 @@ async def _confirm_delete_agent(query: str) -> str:
         flags=re.IGNORECASE,
     )
     if not match:
-        return "Confirmation incomplète. Exemple : confirme suppression monitoring_agent"
+        return "Confirmation incomplète. Exemple : confirme suppression pc_remote_agent"
 
     slug = _clean_agent_module_name(match.group(1))
     if not slug:
-        return "Confirmation incomplète. Exemple : confirme suppression monitoring_agent"
+        return "Confirmation incomplète. Exemple : confirme suppression pc_remote_agent"
 
     from core.modules.self_model.agents_write import delete_agent
 
@@ -490,7 +490,7 @@ async def _confirm_delete_agent(query: str) -> str:
 async def _delete_agent(query: str) -> str:
     slug = _extract_agent_management_slug(query, ("supprime", "supprimer", "efface", "effacer"))
     if not slug:
-        return "Demande incomplète. Exemple : supprime agent monitoring_agent"
+        return "Demande incomplète. Exemple : supprime agent pc_remote_agent"
 
     return (
         f"Confirmation requise pour supprimer l'agent {slug} — "

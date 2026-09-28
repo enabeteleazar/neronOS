@@ -86,12 +86,9 @@ def _normalize_agent(
 ) -> dict[str, Any]:
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
     source = str(metadata.get("source") or "")
-    agent_id = str(agent.get("agent_id") or "")
     runtime_type = str(metadata.get("runtime_type") or "")
     if runtime_type not in {"persistent", "temporary", "unknown"}:
-        if agent_id == "local_mock":
-            runtime_type = "temporary"
-        elif source in {"core_builtin", "agent_runtime"}:
+        if source in {"core_builtin", "agent_runtime"}:
             runtime_type = "persistent"
         else:
             runtime_type = "unknown"
