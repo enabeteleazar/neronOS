@@ -66,7 +66,7 @@ llm:
   # code en dur `llama3.2:1b`, un modele qui n'est PAS installe sur cette
   # machine. Ollama se rabattait donc sur le premier modele disponible
   # (qwen3.5:2b, 3,4 Go) et chaque appel partait en ReadTimeout.
-  model: qwen3:1.7b
+  model: qwen3.5:2b
 
   # Timeout d'un appel a Ollama. Etait 300 s (600 s avec les retries), soit
   # plus que le timeout de Core : Core abandonnait pendant que le LLM
@@ -150,7 +150,7 @@ tasks:
 
   reasoning:
     providers: [ollama]
-    model: qwen3:1.7b
+    model: qwen3.5:2b
     mode: single
 
   agent:
@@ -167,9 +167,9 @@ tasks:
     # jamais : 280 s sans reponse sur "/input/text", mesure le 03/09/2026.
     # Comme "chat" est le parcours le plus utilise, cette saturation
     # ralentissait tout Core et faisait echouer les sondes du Doctor.
-    # qwen3:1.7b est aussi le modele de "reasoning" : un seul modele reste
+    # qwen3.5:2b est aussi le modele de "reasoning" : un seul modele reste
     # charge en memoire pour les deux taches.
-    model: qwen3:1.7b
+    model: qwen3.5:2b
     mode: single
 
   memory:
@@ -177,12 +177,12 @@ tasks:
     # Aligne sur `chat` A DESSEIN. Chaque conversation declenche d'abord un
     # appel `memory` (contexte Oblivia) PUIS l'appel `chat` : avec deux
     # modeles differents, Ollama — qui ne traite qu'une generation a la fois —
-    # devait permuter entre qwen3:4b-instruct (2,5 Go) et qwen3:1.7b (1,4 Go)
+    # devait permuter entre qwen3:4b-instruct (2,5 Go) et qwen3.5:2b (1,4 Go)
     # a chaque echange. Sur 2 coeurs et ~2 Go libres, les deux appels
     # expiraient l'un apres l'autre (ReadTimeout a 45 s chacun, mesure du
     # 03/09/2026), et ce meme avec le modele deja charge.
     # Un seul modele pour le couple memory+chat : plus de permutation.
-    model: qwen3:1.7b
+    model: qwen3.5:2b
     mode: single
 
   fast:
