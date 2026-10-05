@@ -8,7 +8,11 @@ from typing import Any
 from agents.factory.registry import DynamicAgentRegistry
 from modules.capabilities.models import Capability
 from modules.capabilities.router import normalize_text
-from goal.projects.manager import ProjectManager, get_project_manager
+try:
+    from goal.projects.manager import ProjectManager, get_project_manager
+except ImportError:  # goal absent (service séparé)
+    from common.goal_unavailable import unavailable
+    ProjectManager, get_project_manager = unavailable('ProjectManager', 'get_project_manager')
 
 _GENERIC_RESPONSE_MARKERS = (
     "demande traitee",

@@ -12,7 +12,11 @@ from modules.cognitive.planner import get_planner
 from modules.cognitive.reasoner import get_reasoner
 from modules.cognitive.decision_engine import get_decision_engine
 from modules.cognitive.action_executor import get_action_executor
-from goal.system.task_manager import normalize_task_title
+try:
+    from goal.system.task_manager import normalize_task_title
+except ImportError:  # goal absent (service séparé)
+    from common.goal_unavailable import unavailable
+    normalize_task_title, = unavailable('normalize_task_title')
 from server.common.runtime.governor import get_runtime_governor
 
 @dataclass

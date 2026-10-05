@@ -7,9 +7,21 @@ from pathlib import Path
 from typing import Any
 
 from common.paths import NERON_DATA_DIR
-from goal.planning import AutonomousPlanner
-from goal.planning.storage import PlanStorage
-from goal.system.task_manager import get_task_manager
+try:
+    from goal.planning import AutonomousPlanner
+except ImportError:  # goal absent (service séparé)
+    from common.goal_unavailable import unavailable
+    AutonomousPlanner, = unavailable('AutonomousPlanner')
+try:
+    from goal.planning.storage import PlanStorage
+except ImportError:  # goal absent (service séparé)
+    from common.goal_unavailable import unavailable
+    PlanStorage, = unavailable('PlanStorage')
+try:
+    from goal.system.task_manager import get_task_manager
+except ImportError:  # goal absent (service séparé)
+    from common.goal_unavailable import unavailable
+    get_task_manager, = unavailable('get_task_manager')
 from modules.cognitive.history import append_jsonl
 
 

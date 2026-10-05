@@ -11,7 +11,11 @@ from modules.evolution.codex_runner import CODEX_MISSING_ERROR, CodexRunner, red
 from modules.evolution.models import EvolutionProposal
 from modules.evolution.proposal_engine import ProposalEngine
 from modules.evolution.storage import EvolutionStorage
-from goal.projects.manager import ProjectManager, get_project_manager
+try:
+    from goal.projects.manager import ProjectManager, get_project_manager
+except ImportError:  # goal absent (service séparé)
+    from common.goal_unavailable import unavailable
+    ProjectManager, get_project_manager = unavailable('ProjectManager', 'get_project_manager')
 
 
 logger = logging.getLogger("neron.evolution")
