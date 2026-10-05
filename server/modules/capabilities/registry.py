@@ -23,6 +23,17 @@ _GENERIC_RESPONSE_MARKERS = (
 
 
 class CapabilityRegistry:
+    @property
+    def project_manager(self):
+        # Résolu à l'usage : goal peut être absent au démarrage (service séparé)
+        if self._project_manager is None:
+            self._project_manager = get_project_manager()
+        return self._project_manager
+
+    @project_manager.setter
+    def project_manager(self, value):
+        self._project_manager = value
+
     def __init__(
         self,
         *,
@@ -31,7 +42,7 @@ class CapabilityRegistry:
         builtins: Iterable[Capability] | None = None,
     ) -> None:
         self.agent_registry = agent_registry or DynamicAgentRegistry()
-        self.project_manager = project_manager or get_project_manager()
+        self._project_manager = project_manager
         self._builtins = list(
             self._default_builtins() if builtins is None else builtins
         )
