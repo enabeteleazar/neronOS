@@ -19,5 +19,11 @@ set +a
 export NERON_ROOT="$ROOT"
 export PYTHONPATH="$ROOT:$ROOT/server"
 
+echo " === fuser === "
+
+fuser -k 8010/tcp && fuser -k 18789/tcp
+
+echo " === Lancement de Neron=== "
+
 cd "$ROOT/server"
 exec "$PY" -m common.serve core
