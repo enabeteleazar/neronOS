@@ -26,8 +26,16 @@ from modules.events.event_types import (
     AGENT_PROMOTED,
     AGENT_REGISTERED,
 )
-from goal.goals.execution_engine import GoalExecutionEngine
-from goal.projects.manager import ProjectManager, get_project_manager
+try:
+    from goal.goals.execution_engine import GoalExecutionEngine
+except ImportError:  # goal absent (service séparé)
+    from common.goal_unavailable import unavailable
+    GoalExecutionEngine, = unavailable('GoalExecutionEngine')
+try:
+    from goal.projects.manager import ProjectManager, get_project_manager
+except ImportError:  # goal absent (service séparé)
+    from common.goal_unavailable import unavailable
+    ProjectManager, get_project_manager = unavailable('ProjectManager', 'get_project_manager')
 from core.runtime.sandbox.agent_sandbox import AgentSandbox
 from modules.validation.business_validator import BusinessValidator
 

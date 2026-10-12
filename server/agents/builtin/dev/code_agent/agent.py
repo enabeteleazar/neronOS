@@ -592,6 +592,8 @@ class CodeAgent(BaseAgent):
                 {"role": "user",   "content": prompt},
             ],
             "stream": False,
+            "think": False,
+            "keep_alive": "10m",
         }
         for attempt in range(1, 3):
             try:

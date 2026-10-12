@@ -12,11 +12,31 @@ import json
 from pathlib import Path
 from datetime import datetime, timezone
 
-from goal.planning.storage import PlanStorage
-from goal.planning import AutonomousPlanner
-from goal.system.task_manager import get_task_manager
-from goal.planning.executor import PlanExecutor
-from goal.system.task_manager import get_task_manager
+try:
+    from goal.planning.storage import PlanStorage
+except ImportError:  # goal absent (service séparé)
+    from common.goal_unavailable import unavailable
+    PlanStorage, = unavailable('PlanStorage')
+try:
+    from goal.planning import AutonomousPlanner
+except ImportError:  # goal absent (service séparé)
+    from common.goal_unavailable import unavailable
+    AutonomousPlanner, = unavailable('AutonomousPlanner')
+try:
+    from goal.system.task_manager import get_task_manager
+except ImportError:  # goal absent (service séparé)
+    from common.goal_unavailable import unavailable
+    get_task_manager, = unavailable('get_task_manager')
+try:
+    from goal.planning.executor import PlanExecutor
+except ImportError:  # goal absent (service séparé)
+    from common.goal_unavailable import unavailable
+    PlanExecutor, = unavailable('PlanExecutor')
+try:
+    from goal.system.task_manager import get_task_manager
+except ImportError:  # goal absent (service séparé)
+    from common.goal_unavailable import unavailable
+    get_task_manager, = unavailable('get_task_manager')
 from modules.cognitive.critic_engine import get_critic_engine
 from modules.code_awareness.analyzer import analyze_file
 from modules.code_awareness.architecture_mapper import map_architecture

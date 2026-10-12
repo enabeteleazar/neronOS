@@ -10,9 +10,21 @@ from pathlib import Path
 from typing import Any
 
 from common.paths import NERON_DATA_DIR
-from goal.goals.goal_manager import get_goal_manager
-from goal.planning import AutonomousPlanner
-from goal.planning.storage import PlanStorage
+try:
+    from goal.goals.goal_manager import get_goal_manager
+except ImportError:  # goal absent (service séparé)
+    from common.goal_unavailable import unavailable
+    get_goal_manager, = unavailable('get_goal_manager')
+try:
+    from goal.planning import AutonomousPlanner
+except ImportError:  # goal absent (service séparé)
+    from common.goal_unavailable import unavailable
+    AutonomousPlanner, = unavailable('AutonomousPlanner')
+try:
+    from goal.planning.storage import PlanStorage
+except ImportError:  # goal absent (service séparé)
+    from common.goal_unavailable import unavailable
+    PlanStorage, = unavailable('PlanStorage')
 from modules.cognitive.history import append_jsonl
 
 logging.basicConfig(
