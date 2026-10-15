@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from core.goal_engine import AgentCreationRequest, AgentFactory, GoalEngine, GoalRequest
+from goal_engine import AgentCreationRequest, AgentFactory, GoalEngine, GoalRequest
 from core.providers.models import ProviderRequest, ProviderResponse
 from core.providers.registry import ProviderRegistry
 

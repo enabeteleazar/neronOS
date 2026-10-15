@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.goal_engine import GoalExecutionLoop
+from goal_engine import GoalExecutionLoop
 
 
 pytestmark = pytest.mark.anyio

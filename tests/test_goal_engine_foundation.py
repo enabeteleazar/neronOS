@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from core.a2a import A2AClient, AgentCard
-from core.goal_engine import (
+from goal_engine import (
     AgentCreationRequest,
     AgentFactory,
     AgentRegistry,
@@ -225,27 +225,3 @@ async def test_simple_intents_do_not_route_to_goal_engine(query: str):
     decision, _ = await CoreOrchestrator().decide(query)
 
     assert decision.selected_route != "goal_engine"
-
-
-async def test_orchestrator_routes_goal_request_to_goal_engine():
-    memory = FakeMemoryProvider()
-    engine = GoalEngine(
-        providers=_registry_with_memory(memory),
-        a2a=A2AClient(),
-        agents=AgentRegistry(),
-    )
-    orchestrator = CoreOrchestrator(goal_engine_instance=engine)
-
-    result = await orchestrator.handle(
-        "Crée un agent capable de surveiller l’état de Néron."
-    )
-
-    assert result.decision.selected_route == "goal_engine"
-    assert result.executor == "goal_engine"
-    assert result.metadata["selected_route"] == "goal_engine"
-    assert result.metadata["executor"] == "goal_engine"
-    assert result.metadata["agent_creation_required"] is True
-    assert result.metadata["agent_found"] is False
-    assert result.metadata["llm_used"] is False
-    assert result.metadata["a2a_used"] is False
-    assert result.metadata["memory_learned"] is True

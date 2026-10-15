@@ -35,9 +35,9 @@ EXPECTED_DECISION_KEYS = {
         ("Quelle heure est-il ?", "timer_engine"),
         ("Mets un minuteur de 10 minutes", "timer_engine"),
         ("Souviens-toi de mon projet Neron", "memory_provider"),
-        ("Cree un outil pour surveiller systemd", "goal_engine"),
-        ("Analyse cette demande complexe", "goal_engine"),
-        ("/goal cree un agent meteo", "goal_engine"),
+        ("Cree un outil pour surveiller systemd", "manager_delegation"),
+        ("Analyse cette demande complexe", "manager_delegation"),
+        ("/goal cree un agent meteo", "manager_delegation"),
         ("/help", "help_provider"),
         # Domaines externes portes par le registre de passerelles
         # (server/gateways) : doivent atteindre le resolver, jamais tomber
@@ -136,23 +136,6 @@ async def test_help_returns_phase4_sections_without_obsolete_commands():
         "/services",
     ):
         assert obsolete_command not in result.response
-
-
-@pytest.mark.asyncio
-async def test_planner_is_not_consulted_during_route_decision(monkeypatch):
-    def forbidden_planner(*_args, **_kwargs):
-        raise AssertionError("Planner must only be called by an executing pipeline")
-
-    monkeypatch.setattr(
-        "goal.planning.planner.AutonomousPlanner.create_plan",
-        forbidden_planner,
-    )
-
-    decision, _ = await CoreOrchestrator().decide(
-        "Analyse cette demande complexe"
-    )
-
-    assert decision.selected_route == "goal_engine"
 
 
 @pytest.mark.asyncio
@@ -295,43 +278,22 @@ async def test_orchestrator_routes_goal():
         "Créer un agent nommé phase4_agent"
     )
 
-    assert decision.selected_route == "goal_engine"
+    assert decision.selected_route == "manager_delegation"
     assert decision.requires_goal_pipeline is True
     assert decision.requires_agent_factory is False
 
 
 @pytest.mark.asyncio
-async def test_goal_pipeline_only_runs_for_explicit_core_decision():
-    """Une commande /goal explicite atteint bien le moteur Goal.
+async def test_goal_request_is_not_executed_by_the_core():
+    """Une commande /goal n'est jamais exécutée par le Core : elle relève du
+    Manager de chantier et aucune interface de délégation n'est encore définie."""
+    from core.pipeline.orchestrator import MANAGER_DELEGATION_MESSAGE
 
-    `goal_orchestrator_factory` est deprecie et IGNORE depuis la phase 3 :
-    le Coeur ne porte plus de pipeline Goal en process, il passe par le
-    moteur (qui appelle le service goal en HTTP). Le test injecte donc un
-    faux moteur au lieu d'un faux pipeline.
-    """
-
-    class FakeGoalResult:
-        response = "objectif termine"
-
-        def to_orchestrator_metadata(self):
-            return {"status": "plan_finished"}
-
-    class FakeGoalEngine:
-        def __init__(self) -> None:
-            self.calls = []
-
-        async def execute(self, request):
-            self.calls.append((request.objective, request.source))
-            return FakeGoalResult()
-
-    engine = FakeGoalEngine()
-    orchestrator = CoreOrchestrator(goal_engine_instance=engine)
-
-    result = await orchestrator.handle(
+    result = await CoreOrchestrator().handle(
         "/goal cree un agent meteo",
         source_channel="telegram",
     )
 
-    assert result.decision.selected_route == "goal_engine"
-    assert engine.calls == [("cree un agent meteo", "telegram")]
-    assert result.response == "objectif termine"
+    assert result.decision.selected_route == "manager_delegation"
+    assert result.response == MANAGER_DELEGATION_MESSAGE
+    assert result.metadata["delegated"] is False

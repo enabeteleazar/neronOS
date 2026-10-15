@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from core.a2a import A2AClient, AgentCard
-from core.goal_engine import (
+from goal_engine import (
     AgentRegistry,
     GoalEngine,
     GoalRequest,

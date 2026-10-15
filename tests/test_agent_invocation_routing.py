@@ -122,12 +122,12 @@ async def test_agent_invocation_unknown_agent_returns_clear_error():
 
 
 @pytest.mark.asyncio
-async def test_create_agent_still_routes_to_goal():
+async def test_create_agent_is_left_to_the_manager():
     decision, _ = await CoreOrchestrator().decide(
         "Crée un agent nommé validation_goal_engine"
     )
 
-    assert decision.selected_route == "goal_engine"
+    assert decision.selected_route == "manager_delegation"
     assert decision.requires_goal_pipeline is True
 
 

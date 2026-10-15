@@ -103,7 +103,7 @@ async def test_selfmodel_architecture_documents_strict_separation(monkeypatch):
 
     assert architecture["separation"]["providers"]["kind"] == "provider"
     assert architecture["separation"]["agents"]["kind"] == "agent"
-    assert architecture["separation"]["agents"]["developed_by"] == "goal_engine"
+    assert architecture["separation"]["agents"]["developed_by"] == "manager_de_chantier"
     assert architecture["separation"]["agents"]["future_manager"] == "provider_agent"
 
 

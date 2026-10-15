@@ -109,38 +109,16 @@ def test_internal_state_question_routes_to_self_model_not_status():
     assert decision.selected_route == "tool_router"
 
 
-def test_self_model_reports_goal_and_task_anomalies(monkeypatch):
+def test_self_model_leaves_goals_and_tasks_to_the_manager():
     import core.modules.self_model.service as service
-
-    monkeypatch.setattr(
-        service,
-        "_safe_goal_runtime",
-        lambda: {
-            "active_goal": {"id": "goal-test", "status": "active"},
-            "runtime_status": {"status": "interrupted"},
-        },
-    )
-    monkeypatch.setattr(
-        service,
-        "_safe_task_state",
-        lambda: {
-            "summary": {
-                "total": 4,
-                "active": 1,
-                "pending": 0,
-                "running": 0,
-                "failed": 3,
-            }
-        },
-    )
 
     snapshot = service.build_self_model_snapshot()
 
-    assert snapshot["health_global"] == "stable_with_warning"
-    assert snapshot["cognitive_state"]["state"] == "warning"
-    assert any("interrupted" in item for item in snapshot["diagnostics"])
-    assert any("3 tâche(s) en échec" in item for item in snapshot["diagnostics"])
-    assert snapshot["tasks"]["summary"]["failed"] == 3
+    for key in ("goal", "tasks", "goal_engine"):
+        assert snapshot[key]["status"] == "external"
+        assert snapshot[key]["managed_by"] == "manager_de_chantier"
+    assert snapshot["active_goal"] is None
+    assert not any("Goal" in item or "tâche" in item for item in snapshot["diagnostics"])
 
 
 def test_self_model_source_does_not_reintroduce_old_direct_collectors():

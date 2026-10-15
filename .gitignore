@@ -148,3 +148,7 @@ web/neron-app/node_modules/
 web/neron-app/dist/
 web/neron-app/tsconfig.tsbuildinfo
 patches/
+
+
+start.sh
+stop.sh
