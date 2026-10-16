@@ -2,16 +2,15 @@
 # NÉRON AI — MAKEFILE DEV
 # ============================================
 
-.PHONY: help test status submodules clean install-dev install install-check update ollama health
+.PHONY: help test status clean install-dev install install-check update ollama health
 
 help:
 	@echo "NÉRON DEV"
 	@echo ""
 	@echo "Commandes disponibles :"
 	@echo "  make test              Lance les tests"
-	@echo "  make status            Affiche l'état Git et des submodules"
+	@echo "  make status            Affiche l'état Git"
 	@echo "  make health            Vérifie l'environnement NéronOS"
-	@echo "  make submodules        Initialise/met à jour les submodules"
 	@echo "  make clean             Nettoie les caches Python/Pytest"
 	@echo "  make update            Met à jour les paquets venv"
 	@echo "  make install-dev       Installe les dépendances"
@@ -23,11 +22,6 @@ test:
 
 status:
 	git status
-	@echo ""
-	git submodule status
-
-submodules:
-	git submodule update --init --recursive
 
 clean:
 	@neron clean

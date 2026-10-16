@@ -11,10 +11,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          # Les tests du parent importent core, goal, llm, memory... qui sont
-          # des sous-modules : sans eux la collecte pytest echoue entierement.
-          submodules: recursive
 
       - name: Setup Python
         uses: actions/setup-python@v5

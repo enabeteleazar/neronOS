@@ -72,7 +72,7 @@ Registry:
   service <nom>       Affiche le détail d'un service
 
 Utilisateur:
-  version             Affiche les versions du Core et des submodules
+  version             Affiche la version de Néron
   goal "demande"      Envoie un objectif à Néron
   chat "message"      Envoie un message simple à Néron
   help                Affiche cette aide
@@ -107,19 +107,6 @@ cmd_version() {
   echo " Commit : $(git rev-parse --short HEAD)"
   echo " Version: $(git describe --tags --always)"
   echo
-
-  echo "Submodules:"
-
-  git submodule foreach --quiet '
-    branch=$(git branch --show-current)
-    [ -z "$branch" ] && branch="detached"
-
-    echo " $name:"
-    echo "   Branch : $branch"
-    echo "   Commit : $(git rev-parse --short HEAD)"
-    echo "   Version: $(git describe --tags --always)"
-    echo
-  ' || true
 }
 
 cmd_goal() {
