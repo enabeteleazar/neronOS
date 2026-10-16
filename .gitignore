@@ -93,8 +93,8 @@ ollama/
 # =========================
 # GIT
 # =========================
-# NB : .gitmodules et .github/ sont VOLONTAIREMENT suivis — ne pas les ignorer,
-# le clonage des sous-modules et la CI en dependent.
+# NB : .github/ est VOLONTAIREMENT suivi — ne pas l'ignorer,
+# la CI en depend.
 venv/
 .venv/
 
