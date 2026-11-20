@@ -176,7 +176,6 @@ class TestIntentAgentList:
 class TestIntentConversation:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("query", [
-        "bonjour",
         "comment ça va ?",
         "tu peux m'aider ?",
         "test",
@@ -187,6 +186,15 @@ class TestIntentConversation:
         result = await router.route(query)
         assert result.intent == Intent.CONVERSATION
         assert result.confidence in ["medium", "high"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("query", ["bonjour", "salut", "bonjour neron"])
+    async def test_greetings_are_not_generic_conversation(self, router, query):
+        # Une salutation a son propre intent : l'orchestrateur y repond
+        # localement (route smalltalk) au lieu d'appeler le LLM.
+        # Voir tests/test_smalltalk_stays_local.py.
+        result = await router.route(query)
+        assert result.intent == Intent.GREETING
 
 
 class TestIntentEmpty:

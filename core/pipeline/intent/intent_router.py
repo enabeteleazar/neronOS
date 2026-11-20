@@ -389,10 +389,13 @@ def _fallback_intent(query: str) -> Intent | None:
     if any(k in q for k in tool_creation_keywords):
         return Intent.TOOL_CREATION
 
-    # Les salutations simples restent conversationnelles pour éviter
-    # de détourner les échanges courts comme "bonjour".
+    # Les salutations etaient renvoyees en CONVERSATION pour contourner le
+    # detecteur timer, qui prenait « bonjour » pour une question de date.
+    # Ce detecteur compare desormais des mots entiers : les salutations
+    # retrouvent leur intent et sont repondues localement par la branche
+    # `smalltalk` de l'orchestrateur, sans appel au LLM.
     if q in greeting_keywords:
-        return Intent.CONVERSATION
+        return Intent.GREETING
 
     if q in thanks_keywords:
         return Intent.THANKS

@@ -152,7 +152,11 @@ async def test_goal_status_response_is_not_json():
         ("Quels modules sont chargés ?", "status_provider"),
         ("Quels modules sont disponibles ?", "status_provider"),
         ("Ton système fonctionne-t-il correctement ?", "status_provider"),
-        ("Comment vas-tu ?", "status_provider"),
+        # Civilite, pas demande d'etat : reponse locale « Tout va bien, merci »
+        # plutot qu'un rapport technique (decision du 03/09/2026, 80d6794).
+        # Une demande d'etat explicite (« Comment va ton systeme ? ») reste
+        # sur status_provider. Voir tests/test_smalltalk_stays_local.py.
+        ("Comment vas-tu ?", "smalltalk"),
         ("As-tu détecté des problèmes ?", "status_provider"),
         ("Le Core fonctionne-t-il ?", "status_provider"),
         ("Où en est mon objectif ?", "tool_router"),

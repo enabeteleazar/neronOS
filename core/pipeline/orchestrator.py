@@ -33,6 +33,20 @@ logger = get_logger("core.pipeline.orchestrator")
 
 # Le Core (Agent Patron) ne traite pas les objectifs de chantier : ils relèvent
 # du Manager de chantier. Aucune interface de délégation n'est définie à ce jour.
+# Civilites : reponses locales, sans modele de langage. La cascade de mots-cles
+# reconnaissait deja ces intents, mais aucune branche ne les traitait — ils
+# finissaient sur le provider LLM, soit 67 s pour repondre « Bonjour »
+# (mesure du 03/09/2026). Reponses volontairement sobres et stables : ce sont
+# des accuses de reception, pas des reponses a construire.
+# Correction initiale : 80d6794, perdue lors de la reintegration du Core
+# (58ab382), retablie ici. Voir tests/test_smalltalk_stays_local.py.
+_SMALLTALK_REPLIES: dict[Intent, str] = {
+    Intent.GREETING: "Bonjour. Que puis-je faire pour toi ?",
+    Intent.THANKS: "Je t'en prie.",
+    Intent.GOODBYE: "À bientôt.",
+    Intent.STATUS_SMALLTALK: "Tout va bien, merci. Et toi ?",
+}
+
 MANAGER_DELEGATION_ROUTE = "manager_delegation"
 MANAGER_DELEGATION_MESSAGE = (
     "Cette demande relève du Manager de chantier (objectifs, plans, tâches, "
@@ -249,6 +263,20 @@ class CoreOrchestrator:
                 complexity="complex",
                 requires_goal_pipeline=True,
                 requires_governor=True,
+            )
+        elif intent in _SMALLTALK_REPLIES:
+            # Placee AVANT la branche status : « comment vas-tu » et « ca va »
+            # sont captes par `detect_status_intent` comme `health_query`, et
+            # recevaient donc un rapport technique la ou la cascade de
+            # mots-cles les avait — correctement — classes en
+            # `status_smalltalk`, c'est-a-dire en civilite. Une demande d'etat
+            # explicite (« quel est ton statut ») porte un autre intent et
+            # continue de passer par status_provider.
+            decision = OrchestratorDecision(
+                intent=intent.value,
+                selected_route="smalltalk",
+                reason="Civilite traitee localement par le Core.",
+                complexity="simple",
             )
         elif (
             status_result.get("matched") or intent == Intent.SYSTEM_STATUS
@@ -482,6 +510,10 @@ class CoreOrchestrator:
         if route == "registered_agent_runtime":
             self._log_used("registered_agent_runtime_used", decision)
             return await self._execute_registered_agent(query, request_metadata)
+
+        if route == "smalltalk":
+            self._log_used("smalltalk_used", decision)
+            return self._execute_smalltalk(decision)
 
         if route == "timer_engine":
             self._log_used("timer_used", decision)
@@ -731,6 +763,29 @@ class CoreOrchestrator:
         }
 
         return result["response"], result["agent"], metadata
+
+    def _execute_smalltalk(
+        self,
+        decision: OrchestratorDecision,
+    ) -> tuple[str, str, dict[str, Any]]:
+        """Civilites : reponse locale immediate, aucun appel sortant."""
+        try:
+            intent = Intent(decision.intent)
+        except ValueError:
+            intent = Intent.GREETING
+
+        response = _SMALLTALK_REPLIES.get(intent, _SMALLTALK_REPLIES[Intent.GREETING])
+
+        metadata = {
+            "selected_route": "smalltalk",
+            "executor": "smalltalk_module",
+            "fallback_used": False,
+            "retries": 0,
+            "source": "smalltalk_module",
+            "llm_used": False,
+        }
+
+        return response, "smalltalk_module", metadata
 
     def _execute_timer(
         self,
