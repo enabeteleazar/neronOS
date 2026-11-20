@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from common.paths import NERON_DATA_DIR, NERON_ROOT, NERON_WORKSPACE_DIR
+from agents.factory.agent_state import is_disabled as is_agent_disabled
+from agents.factory.agent_state import set_enabled as set_agent_state
 from agents.factory.registry import DEFAULT_GENERATED_AGENTS, DynamicAgentRegistry
 from agents.factory.promotion import AgentPromotionService
 from agents.factory.validator import validate_agent
@@ -73,6 +75,7 @@ class AgentManager:
             "agent": name,
             "exists": True,
             "protected": self._is_protected(name),
+            "enabled": not is_agent_disabled(self.generated_agents, name),
             "path": str(path),
             "size_bytes": path.stat().st_size,
             "sha256": self._sha256(path),
@@ -151,6 +154,32 @@ class AgentManager:
             "deleted": True,
             "backup": backup,
             "runtime_reload": runtime_reload,
+        }
+
+    def set_agent_enabled(self, agent_name: str, enabled: bool) -> dict[str, Any]:
+        """Active ou désactive un agent, de façon persistante.
+
+        Un agent désactivé reste sur disque mais le runtime refuse de
+        l'exécuter (agent_disabled:<nom>) et goal_engine ne le sélectionne
+        plus. Exposé par neronGoal : POST /agents/{nom}/enable|disable.
+        """
+        name = self._normalize_agent_name(agent_name)
+        if self._is_protected(name):
+            return {
+                "status": "refused",
+                "agent": name,
+                "reason": "protected_agent",
+                "protected": True,
+                "enabled": None,
+            }
+        if not self._agent_path(name).exists():
+            return {"status": "not_found", "agent": name, "enabled": None}
+
+        disabled = set_agent_state(self.generated_agents, name, enabled)
+        return {
+            "status": "enabled" if enabled else "disabled",
+            "agent": name,
+            "enabled": name not in disabled,
         }
 
     def revise_agent(self, agent_name: str) -> dict[str, Any]:

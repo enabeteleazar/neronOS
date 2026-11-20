@@ -23,6 +23,7 @@ from modules.events.event_types import (
     AGENT_EXECUTION_COMPLETED,
     AGENT_EXECUTION_STARTED,
 )
+from agents.factory.agent_state import is_disabled as is_agent_disabled
 from tools.registry import ToolRegistry, get_tool_registry
 from tools.runtime import ToolRuntime, get_tool_runtime
 
@@ -36,6 +37,10 @@ class AgentNotFoundError(LookupError):
 
 class AgentToolUnavailableError(RuntimeError):
     pass
+
+
+class AgentDisabledError(RuntimeError):
+    """Agent présent mais désactivé (agents/factory/agent_state.py)."""
 
 
 class AgentRuntime:
@@ -102,6 +107,10 @@ class AgentRuntime:
             raise AgentNotFoundError(
                 f"agent_not_found:{slug};available={available}"
             )
+
+        generated_dir = getattr(self.registry, "generated_dir", None)
+        if generated_dir is not None and is_agent_disabled(generated_dir, resolved_slug):
+            raise AgentDisabledError(f"agent_disabled:{resolved_slug}")
 
         records = getattr(self.registry, "_records", {})
         record = records.get(resolved_slug, record) if isinstance(records, dict) else record

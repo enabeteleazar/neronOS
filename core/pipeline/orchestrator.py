@@ -142,6 +142,7 @@ class CoreOrchestrator:
         knowledge_result = detect_knowledge_intent(routing_query)
         gateway_domain = _detect_gateway_domain(routing_query)
         pc_remote_match = _detect_pc_remote_action(routing_query)
+        agent_admin = _parse_agent_admin(query)
         agent_invocation = _parse_agent_invocation(query)
 
         if normalized == "/help":
@@ -159,6 +160,13 @@ class CoreOrchestrator:
                 complexity="complex",
                 requires_goal_pipeline=True,
                 requires_governor=True,
+            )
+        elif agent_admin is not None:
+            decision = OrchestratorDecision(
+                intent=_AGENT_ADMIN_INTENTS[agent_admin[0]].value,
+                selected_route="agent_admin",
+                reason="Gestion d'un agent (activation, désactivation, suppression) déléguée à Goal en HTTP.",
+                complexity="simple",
             )
         elif agent_invocation is not None:
             decision = OrchestratorDecision(
@@ -649,6 +657,10 @@ class CoreOrchestrator:
             )
             return response, "agent_build_orchestrator", {}
 
+        if route == "agent_admin":
+            self._log_used("agent_admin_used", decision)
+            return await self._execute_agent_admin(query)
+
         if route == "agent_manager":
             self._log_used("agent_manager_used", decision)
             response = await self.agent_router.route(
@@ -1051,6 +1063,77 @@ class CoreOrchestrator:
             metadata["error"] = result["error"]
 
         return result["response"], provider.name, metadata
+
+    async def _execute_agent_admin(self, query: str) -> tuple[str, str, dict[str, Any]]:
+        """Active, désactive ou supprime un agent, via l'API HTTP de Goal.
+
+        Le registre d'agents et leurs fichiers vivent côté Goal, éventuellement
+        sur une autre machine : le Core n'y accède jamais directement (la
+        version de septembre, 9f4e3e6/e84fb0b/3a56831, modifiait un registre en
+        mémoire du Core et effaçait des fichiers sur le disque de Goal).
+        La suppression exige une confirmation qui répète le nom de l'agent :
+        sans état côté Core, elle fonctionne d'un appareil ou d'un processus
+        à l'autre.
+        """
+        from server.common.goal_client import GoalClientError, get_goal_client
+
+        parsed = _parse_agent_admin(query)
+        assert parsed is not None
+        action, name = parsed
+        metadata: dict[str, Any] = {"agent": name, "agent_action": action, "llm_used": False}
+
+        if action == "delete":
+            return (
+                f"Supprimer l'agent {name} est irréversible (une sauvegarde est "
+                f"conservée côté Goal). Pour confirmer, réponds : "
+                f"« confirme la suppression de l'agent {name} ».",
+                "agent_admin",
+                metadata,
+            )
+
+        client = get_goal_client()
+        try:
+            if action == "delete_confirm":
+                result = await client.delete_agent(name)
+            else:
+                result = await client.set_agent_enabled(name, action == "enable")
+        except GoalClientError as exc:
+            logger.warning("agent_admin_goal_unreachable action=%s agent=%s error=%s", action, name, exc)
+            return (
+                f"Goal est injoignable : impossible de traiter l'agent {name} pour le moment.",
+                "agent_admin",
+                {**metadata, "error": str(exc)},
+            )
+
+        status = str(result.get("status") or "")
+        agent = str(result.get("agent") or name)
+        metadata["goal_result"] = result
+        if status == "not_found":
+            return f"Agent introuvable : {agent}.", "agent_admin", metadata
+        if status == "refused":
+            return (
+                f"L'agent {agent} est protégé : Goal refuse de le modifier.",
+                "agent_admin",
+                metadata,
+            )
+        if status == "disabled":
+            return (
+                f"Agent {agent} désactivé. Pour le remettre en service : "
+                f"« réactive l'agent {agent} ».",
+                "agent_admin",
+                metadata,
+            )
+        if status == "enabled":
+            return f"Agent {agent} réactivé.", "agent_admin", metadata
+        if status == "deleted":
+            backup = (result.get("backup") or {}).get("backup_path")
+            suffix = f" Sauvegarde : {backup}." if backup else ""
+            return f"Agent {agent} supprimé.{suffix}", "agent_admin", metadata
+        return (
+            f"Goal n'a pas pu traiter l'agent {agent} ({status or 'réponse inattendue'}).",
+            "agent_admin",
+            {**metadata, "error": status or "unexpected_goal_response"},
+        )
 
     async def _fetch_memory_context(self, query: str) -> str | None:
         """Résumé mémoire (Oblivia) à injecter dans le prompt de conversation
@@ -1657,6 +1740,7 @@ _ROUTES_SANS_OBSERVATION = frozenset({
     # modèle pendant la réponse suivante.
     "smalltalk",
     "help_provider",
+    "agent_admin",
 })
 
 
@@ -1769,6 +1853,45 @@ def _detect_gateway_domain(query: str) -> str | None:
     classification = DomainClassifier().classify(query)
     if classification.domain in GATEWAY_DOMAINS and classification.confidence >= 0.9:
         return classification.domain
+    return None
+
+
+# ── Gestion des agents (activation, désactivation, suppression) ────────────
+# Le mot « agent » est obligatoire : la version de septembre acceptait aussi
+# « active la … » et « supprime l'… », ce qui captait « active la lumière ».
+# « active agent X » n'est PAS repris ici : c'est la promotion d'un agent
+# généré (agent_router._is_promote_request), sens existant conservé.
+
+_AGENT_ADMIN_INTENTS = {
+    "enable": Intent.AGENT_ENABLE,
+    "disable": Intent.AGENT_DISABLE,
+    "delete": Intent.AGENT_DELETE,
+    "delete_confirm": Intent.AGENT_DELETE_CONFIRM,
+}
+_AGENT_ADMIN_TARGET = r"(?:l'\s*|l\s+|le\s+)?agent\s+([A-Za-z0-9_.-]+)\s*[.!]?\s*$"
+_AGENT_ADMIN_PATTERNS = (
+    ("delete_confirm", r"^\s*confirmer?\s+(?:la\s+)?suppression\s+(?:de\s+)?" + _AGENT_ADMIN_TARGET),
+    ("disable", r"^\s*(?:d[ée]sactiver?|arr[êe]ter?|stopper?)\s+" + _AGENT_ADMIN_TARGET),
+    ("enable", r"^\s*r[ée]activer?\s+" + _AGENT_ADMIN_TARGET),
+    ("delete", r"^\s*(?:supprimer?|effacer?)\s+" + _AGENT_ADMIN_TARGET),
+)
+
+
+def _parse_agent_admin(query: str) -> tuple[str, str] | None:
+    """(action, nom de l'agent) pour une commande de gestion d'agent, sinon None.
+
+    Lu sur la phrase d'origine : la normalisation remplace « _ » et « - » par
+    des espaces et rendrait « meteo_agent » méconnaissable.
+    """
+    raw = str(query or "").replace("’", "'")
+    for action, pattern in _AGENT_ADMIN_PATTERNS:
+        match = re.match(pattern, raw, flags=re.IGNORECASE)
+        if match:
+            # Les noms peuvent contenir des points : le point final d'une
+            # phrase (« stoppe agent veille_agent. ») n'en fait pas partie.
+            name = match.group(1).rstrip(".")
+            if name:
+                return action, name
     return None
 
 
