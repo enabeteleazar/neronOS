@@ -139,6 +139,7 @@ class CoreOrchestrator:
         status_result = detect_status_intent(routing_query)
         memory_result = detect_memory_intent(routing_query)
         knowledge_result = detect_knowledge_intent(routing_query)
+        gateway_domain = _detect_gateway_domain(routing_query)
         agent_invocation = _parse_agent_invocation(query)
 
         if normalized == "/help":
@@ -277,6 +278,24 @@ class CoreOrchestrator:
                 selected_route="smalltalk",
                 reason="Civilite traitee localement par le Core.",
                 complexity="simple",
+            )
+        elif gateway_domain is not None:
+            # Doit primer sur status_provider ci-dessous : le classifieur
+            # d'intent confond « montre mes contacts/mails/rappels » avec une
+            # requete d'etat systeme (intent=system_status). Le domaine
+            # externe, detecte de facon deterministe, est prioritaire.
+            # Correction initiale : 78a93ea (26/09/2026), perdue lors de la
+            # reintegration du Core (58ab382), retablie ici.
+            decision = OrchestratorDecision(
+                intent=intent.value,
+                selected_route="resolver",
+                reason=(
+                    f"Domaine externe '{gateway_domain}' porte par le "
+                    "registre de passerelles (server/gateways)."
+                ),
+                complexity="complex",
+                requires_resolver=True,
+                requires_governor=True,
             )
         elif (
             status_result.get("matched") or intent == Intent.SYSTEM_STATUS
@@ -1579,6 +1598,27 @@ def _requires_specialized_resolution(query: str) -> bool:
         "subnet",
     )
     return any(token in query for token in durable + complex_request)
+
+
+def _detect_gateway_domain(query: str) -> str | None:
+    """Domaine externe (mail, contacts, notes, reminders, calendar, repos,
+    docs) porte par le registre de passerelles (server/gateways), detecte
+    avec confiance elevee, sinon None.
+
+    Calcule une fois, tot dans `decide()`, plutot que dans
+    `_requires_specialized_resolution` plus bas dans la cascade : le
+    classifieur d'intent misclasse ces phrases (« montre mes contacts » ->
+    intent=system_status) et la branche status_provider les captait avant.
+    Sans cette detection, elles tombaient dans le chat LLM generique, qui
+    inventait une reponse. Regression constatee le 26/09/2026.
+    """
+    from modules.capabilities.decision_engine import GATEWAY_DOMAINS
+    from modules.capabilities.domain_classifier import DomainClassifier
+
+    classification = DomainClassifier().classify(query)
+    if classification.domain in GATEWAY_DOMAINS and classification.confidence >= 0.9:
+        return classification.domain
+    return None
 
 
 def _requires_goal_pipeline(query: str) -> bool:

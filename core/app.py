@@ -96,8 +96,12 @@ from core.pipeline.routing.agent_router import (
     RouterToolBindings,
 )
 from core.gateway.gateway import GatewayConfig, NeronGateway
+# Le vrai resolver, et non le stub de runtime_compat dont .resolve() renvoyait
+# toujours {"status": "unavailable"} : sous forme de dict, il faisait en plus
+# echouer l'orchestrateur, qui lit `result.async_started`. Correction initiale
+# 78a93ea, perdue lors de la reintegration du Core (58ab382).
+from modules.capabilities.resolver import CapabilityResolver
 from core.runtime_compat import (
-    CapabilityResolver,
     SessionStore,
     SkillRegistry,
     get_self_monitor,

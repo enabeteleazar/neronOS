@@ -30,17 +30,6 @@ def include_optional_router(app: Any, router: APIRouter | None, *args: Any, **kw
     return True
 
 
-class CapabilityResolver:
-    async def get_result(self, request_id: str) -> Any:
-        return None
-
-    async def resolve(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
-        return {
-            "status": "unavailable",
-            "reason": "capability resolver is not installed in Core runtime",
-        }
-
-
 class SessionStore:
     pass
 
