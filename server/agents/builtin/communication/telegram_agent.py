@@ -552,9 +552,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await sent.edit_text(f"❌ Erreur: {e}")
 
 
-async def send_notification(message: str, level: str = "info") -> None:
+async def send_notification(message: str, level: str = "info") -> bool:
+    """Envoie une notification. True seulement si Telegram l'a acceptée.
+
+    Les appelants historiques ignorent le retour ; POST /notify s'en sert pour
+    ne pas déclarer « envoyée » une notification jamais partie.
+    """
     if not _telegram_app or not TELEGRAM_CHAT_ID:
-        return
+        logger.warning("Notification non envoyée : bot Telegram inactif ou chat_id absent")
+        return False
 
     icons = {"info": "ℹ", "warning": "⚠", "alert": "🔴", "error": "❌"}
     icon = icons.get(level, "📢")
@@ -567,6 +573,8 @@ async def send_notification(message: str, level: str = "info") -> None:
         )
     except Exception as e:
         logger.error("Erreur notification Telegram : %s", e)
+        return False
+    return True
 
 
 async def start_bot() -> None:
