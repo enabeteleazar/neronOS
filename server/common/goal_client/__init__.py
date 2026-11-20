@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -131,6 +132,21 @@ class GoalClient:
     async def start_next_task(self) -> dict[str, Any] | None:
         result = await self._request("POST", "/tasks/next/start", allow_404=True)
         return (result or {}).get("task") if result else None
+
+    # ── Agents ─────────────────────────────────────────────────────────
+    # Le registre d'agents et leurs fichiers vivent côté Goal, éventuellement
+    # sur une autre machine : le Core ne les touche qu'à travers ces routes.
+
+    async def set_agent_enabled(self, agent_name: str, enabled: bool) -> dict[str, Any]:
+        action = "enable" if enabled else "disable"
+        result = await self._request("POST", f"/agents/{quote(agent_name, safe='')}/{action}")
+        assert result is not None
+        return result
+
+    async def delete_agent(self, agent_name: str) -> dict[str, Any]:
+        result = await self._request("POST", f"/agents/{quote(agent_name, safe='')}/delete")
+        assert result is not None
+        return result
 
 
 _goal_client: GoalClient | None = None
