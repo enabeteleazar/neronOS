@@ -39,7 +39,7 @@ PLATFORMS = {
 # l'on ajoute du couplage. Corriger le code, ou justifier explicitement.
 BASELINE: dict[str, int] = {
     "agents->common": 10,
-    "agents->core": 29,
+    "agents->core": 24,  # 29 -> 24 : bac à sable déplacé dans le noyau (20/11/2026)
     "agents->goal": 7,
     # +2 (2 -> 4) : agents/builtin/automation/pc_remote_agent.py importe
     # integrations.pc_remote.errors et .service, meme motif que ha_agent.py
@@ -49,8 +49,6 @@ BASELINE: dict[str, int] = {
     "agents->modules": 26,
     "agents->tools": 4,
     "agents->voice": 2,
-    "core->agents": 20,
-    "core->common": 17,
     # Phase 2D : 26 -> 22. Retires : task_routes.py (code mort non monte, 2),
     # plan_storage_factory (injection morte, 1), planner_from_goal migre vers
     # GoalClient (1). Voir phase2d-goal-boundary-decision.md.
@@ -58,48 +56,34 @@ BASELINE: dict[str, int] = {
     # Goal montes par Core ne bouge PAS ce compteur : le montage passait par
     # importlib.import_module(<chaine>), invisible en AST. Il est verrouille
     # par tests/test_core_does_not_serve_goal.py.
-    "core->goal": 21,
     # +1 (1 -> 2) : orchestrator.py::_detect_pc_remote_action importe
     # integrations.pc_remote.config.load_devices pour matcher les devices
     # declares avant le faux-positif system_status (meme motif que
     # gateway_domain juste en dessous, memes lignes).
-    "core->integrations": 2,
     # +3 (30 -> 33) : orchestrator.py et app.py consultent
     # modules.capabilities (DomainClassifier, GATEWAY_DOMAINS, le vrai
     # CapabilityResolver) pour router les domaines externes vers le
     # registre de passerelles (server/gateways). Couplage volontaire, cf.
     # modules->gateways plus haut.
-    "core->modules": 33,
-    "core->tools": 2,
-    "doctor->common": 3,
-    "goal->agents": 3,
-    "goal->common": 21,
-    "goal->core": 2,
-    "goal->integrations": 2,
-    "goal->modules": 3,
     "integrations->common": 2,
     "integrations->core": 1,
     # +1 (1 -> 2) : integrations/pc_remote/tool.py importe ToolResult/ToolSpec
     # depuis tools.models, meme motif que integrations/homeassistant/tool.py.
     # Couplage volontaire, meme nature que integrations->core (provider.py).
     "integrations->tools": 2,
-    "llm->common": 5,
     # Phase 2F : llm->core retire (etait 2). Les contrats de providers
     # (models, protocol) vivent desormais dans server/common/providers : le
     # Coeur n a plus a dependre de Core pour parler son propre langage.
-    "memory->common": 2,
     "modules->agents": 4,
     "modules->common": 18,
-    "modules->core": 14,
+    "modules->core": 13,  # 14 -> 13 : idem
     # Couplage volontaire (pas une dette) : DecisionEngine et
     # CapabilityResolver consultent le registre de passerelles (server/gateways)
     # avant de generer un agent/tool pour un domaine externe (mail, contacts,
     # notes, reminders, calendar, repos, docs). Voir decision_engine.py et
     # resolver.py._gateway_connector / _execute_google_calendar.
-    "modules->gateways": 4,
     "modules->goal": 15,
     "modules->tools": 3,
-    "print->common": 2,
     "tools->agents": 1,
     "tools->common": 5,
     "tools->core": 1,
@@ -108,8 +92,6 @@ BASELINE: dict[str, int] = {
     # meme motif que les 2 sites homeassistant deja presents.
     "tools->integrations": 4,
     "tools->modules": 10,
-    "voice->agents": 2,
-    "voice->common": 2,
 }
 
 # Le cycle constate en Phase 2A. Il doit retrecir, jamais s'etendre.

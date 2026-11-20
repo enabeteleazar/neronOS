@@ -16,7 +16,7 @@ from agents.runtime.models import (
     utc_now_iso,
 )
 from agents.runtime.store import AgentRuntimeStore
-from core.runtime.sandbox.agent_sandbox import AgentSandbox
+from server.common.runtime.sandbox.agent_sandbox import AgentSandbox
 from modules.events.event import Event
 from modules.events.event_bus import event_bus
 from modules.events.event_types import (

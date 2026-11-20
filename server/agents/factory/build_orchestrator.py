@@ -36,7 +36,7 @@ try:
 except ImportError:  # goal absent (service séparé)
     from common.goal_unavailable import unavailable
     ProjectManager, get_project_manager = unavailable('ProjectManager', 'get_project_manager')
-from core.runtime.sandbox.agent_sandbox import AgentSandbox
+from server.common.runtime.sandbox.agent_sandbox import AgentSandbox
 from modules.validation.business_validator import BusinessValidator
 
 

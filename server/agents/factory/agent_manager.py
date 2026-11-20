@@ -221,7 +221,15 @@ class AgentManager:
         self._write_update_smoke_test(name, workspace_agent, workspace_test)
 
         snapshot = self._snapshot_generated_agents()
-        runner = self.codex_runner or CodexRunner(workspace=self.project_root)
+        # Codex travaille dans l'espace de travail (copies de l'agent et de son
+        # test), plus à la racine du projet : en mode « workspace-write », il
+        # ne peut écrire que là. Son environnement est expurgé des secrets
+        # (codex_runner.scrubbed_environment).
+        runner = self.codex_runner or CodexRunner(
+            workspace=self.workspace_agents.parent
+            if self.workspace_agents.parent == self.workspace_tests.parent
+            else self.project_root
+        )
         codex_result = await runner.run_codex(
             self._codex_update_prompt(name, update_request, workspace_agent, workspace_test),
             f"agent_update_{name}",
@@ -384,6 +392,13 @@ class AgentManager:
     def _normalize_agent_name(self, agent_name: str) -> str:
         return Path(str(agent_name).strip()).stem
 
+    def _sandbox(self):
+        if getattr(self, "_agent_sandbox", None) is None:
+            from server.common.runtime.sandbox.agent_sandbox import AgentSandbox
+
+            self._agent_sandbox = AgentSandbox(project_root=self.project_root)
+        return self._agent_sandbox
+
     def _is_protected(self, agent_name: str) -> bool:
         return agent_name in PROTECTED_AGENTS
 
@@ -480,6 +495,11 @@ class AgentManager:
         return redact_secrets(str(error))[:1000]
 
     def _run_command(self, command: list[str], name: str) -> dict[str, Any]:
+        if name.startswith("pytest_agent"):
+            # Tests de l'agent modifié : ils exécutent son code. Dans le bac à
+            # sable, comme pour la construction (build_orchestrator), et non
+            # plus dans un pytest héritant de tout l'environnement (secrets).
+            return self._sandbox().run_pytest(command[-1], timeout=120, name=name)
         try:
             completed = subprocess.run(
                 command,

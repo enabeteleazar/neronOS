@@ -191,6 +191,19 @@ class EvolutionSupervisor:
 
         self._update_project(project_id, status="running", step="codex_running", progress=25)
         run = self._update_run(run_id, current_step="codex_running", progress=25, status="running")
+        # Copie git isolée sur une branche evolution/<run_id> : Codex, les
+        # tests et le commit n'y touchent jamais le dépôt en production, et la
+        # branche est poussée pour revue humaine au lieu d'être livrée.
+        prepare = getattr(self.codex_runner, "prepare_isolated_checkout", None)
+        if prepare is not None:
+            checkout = await prepare(run_id)
+            run = self.storage.update_run(run_id, {"checkout": checkout}) or run
+            if not checkout.get("ok"):
+                failed = self._fail_run(
+                    run, f"Copie isolée impossible : {checkout.get('error') or 'git worktree'}"
+                )
+                await self._notify_telegram(_short_run_report(failed))
+                return failed
         codex_result = await self.codex_runner.run_codex(prompt, run_id)
         run = self.storage.update_run(run_id, {"codex": codex_result.to_dict()}) or run
         if not codex_result.ok:
@@ -250,6 +263,7 @@ class EvolutionSupervisor:
                 "branch": commit.get("branch"),
             },
         )
+        self._release_checkout()
         await self._notify_telegram(_short_run_report(completed))
         self.generate_proposals()
         return completed
@@ -324,7 +338,13 @@ class EvolutionSupervisor:
         except Exception:
             logger.exception("Evolution background task ended with an unhandled error: %s", run_id)
 
+    def _release_checkout(self) -> None:
+        cleanup = getattr(self.codex_runner, "cleanup_isolated_checkout", None)
+        if cleanup is not None:
+            cleanup()
+
     def _fail_run(self, run: dict[str, Any], error: str, **updates: Any) -> dict[str, Any]:
+        self._release_checkout()
         payload = {
             "status": "failed",
             "current_step": "failed",
@@ -526,6 +546,8 @@ def _short_run_report(run: dict[str, Any]) -> str:
         lines.append(f"Commit : {run.get('commit_hash')}")
     if run.get("branch"):
         lines.append(f"Branche : {run.get('branch')}")
+        if status == "completed":
+            lines.append("À relire puis fusionner : rien n'est déployé automatiquement.")
     if status == "completed":
         lines.append("Nouvelles propositions générées. En attente de validation.")
     return "\n".join(lines)

@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from common.paths import NERON_ROOT
+from common.paths import NERON_DATA_DIR, NERON_ROOT
 from modules.evolution.models import CommandResult
 
 CODEX_MISSING_ERROR = "Codex CLI introuvable. Configure NERON_CODEX_BIN ou PATH systemd."
@@ -37,6 +37,24 @@ SECRET_PATTERNS = [
         lambda match: f"{match.group(1)}[REDACTED]",
     ),
 ]
+
+
+# Variables jamais transmises à Codex ni aux tests qu'il déclenche : le code
+# qu'il écrit s'exécute avec cet environnement. OPENAI_API_KEY et CODEX_*
+# restent transmis : c'est l'authentification de Codex lui-même.
+_SECRET_ENV = re.compile(r"(?i)(api[_-]?key|token|secret|password|passwd|credential|_auth)")
+_CODEX_ENV_ALLOW = {"OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_ORG_ID"}
+
+
+def scrubbed_environment(base: dict[str, str] | None = None) -> dict[str, str]:
+    """Environnement du processus sans secrets (NERON_API_KEY, jetons
+    Telegram/Twilio, clés Gateways/Google…), sauf l'authentification Codex."""
+    env = dict(os.environ if base is None else base)
+    return {
+        key: value
+        for key, value in env.items()
+        if key in _CODEX_ENV_ALLOW or key.startswith("CODEX_") or not _SECRET_ENV.search(key)
+    }
 
 
 def redact_secrets(text: str) -> str:
@@ -133,6 +151,11 @@ class CodexRunner:
         dry_run: bool | None = None,
     ) -> None:
         self.workspace = workspace
+        # Copie git isolée de l'évolution en cours (prepare_isolated_checkout) :
+        # Codex, les tests et le commit y travaillent, jamais dans le dépôt
+        # qui tourne en production.
+        self._checkout: Path | None = None
+        self._branch: str | None = None
         self.timeout_seconds = timeout_seconds or int(os.getenv("NERON_CODEX_TIMEOUT", "1800"))
         self.dry_run = bool(dry_run) if dry_run is not None else os.getenv("NERON_CODEX_DRY_RUN") == "1"
         self._process: asyncio.subprocess.Process | None = None
@@ -206,7 +229,52 @@ class CodexRunner:
                 break
         return results
 
+    async def prepare_isolated_checkout(self, run_id: str) -> dict:
+        """Crée une copie git (worktree) sur une branche evolution/<run_id>.
+
+        Avant, Codex modifiait directement le dépôt en production, puis le
+        superviseur faisait `git add . && git commit && git push origin HEAD`
+        sur sa branche courante : les changements partaient en ligne sans
+        relecture. Désormais la branche est poussée pour revue ; c'est un
+        humain qui la fusionne.
+        """
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "-", run_id).strip("-") or "run"
+        branch = f"evolution/{safe}"
+        root = Path(os.getenv("NERON_EVOLUTION_WORKTREES", str(NERON_DATA_DIR / "evolution")))
+        checkout = root / safe
+        if self.dry_run:
+            return {"ok": True, "isolated": False, "dry_run": True, "branch": branch}
+        root.mkdir(parents=True, exist_ok=True)
+        added = await self.run_command(
+            "git_worktree_add",
+            ["git", "worktree", "add", "-b", branch, str(checkout), "HEAD"],
+            timeout=120,
+        )
+        if not added.ok:
+            return {"ok": False, "isolated": False, "error": added.stderr or added.stdout, "branch": branch}
+        self._checkout, self._branch = checkout, branch
+        return {"ok": True, "isolated": True, "branch": branch, "path": str(checkout)}
+
+    def cleanup_isolated_checkout(self) -> None:
+        """Retire la copie git (la branche est conservée). Idempotent."""
+        checkout, self._checkout = self._checkout, None
+        if checkout is None:
+            return
+        subprocess.run(
+            ["git", "worktree", "remove", "--force", str(checkout)],
+            cwd=str(self.workspace),
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=scrubbed_environment(),
+            check=False,
+        )
+
     async def commit_and_push(self, message: str) -> dict:
+        if self._checkout is None and not self.dry_run:
+            # Sans copie isolée, on refuse de committer : ce serait le dépôt
+            # vivant et sa branche courante.
+            return {"ok": False, "pushed": False, "error": "evolution_checkout_not_isolated"}
         status = await self.run_command("git_status", ["git", "status", "--short"], timeout=60)
         add = await self.run_command("git_add", ["git", "add", "."], timeout=120)
         if not add.ok:
@@ -222,9 +290,9 @@ class CodexRunner:
                 "pushed": False,
             }
 
-        branch = await self.run_command("git_branch", ["git", "branch", "--show-current"], timeout=30)
         commit_hash = await self.run_command("git_rev_parse", ["git", "rev-parse", "HEAD"], timeout=30)
-        push = await self.run_command("git_push", ["git", "push", "origin", "HEAD"], timeout=600)
+        branch = self._branch or "HEAD"
+        push = await self.run_command("git_push", ["git", "push", "origin", branch], timeout=600)
         return {
             "ok": push.ok,
             "status": status.to_dict(),
@@ -232,7 +300,8 @@ class CodexRunner:
             "commit": commit.to_dict(),
             "push": push.to_dict(),
             "pushed": push.ok,
-            "branch": branch.stdout.strip() if branch.ok else None,
+            "branch": self._branch,
+            "review_required": True,
             "commit_hash": commit_hash.stdout.strip() if commit_hash.ok else None,
         }
 
@@ -246,7 +315,8 @@ class CodexRunner:
         try:
             self._process = await asyncio.create_subprocess_exec(
                 *command,
-                cwd=str(self.workspace),
+                cwd=str(self._checkout or self.workspace),
+                env=scrubbed_environment(),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

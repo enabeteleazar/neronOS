@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from common.paths import NERON_ROOT
-from core.runtime.sandbox.agent_sandbox import AgentSandbox
+from server.common.runtime.sandbox.agent_sandbox import AgentSandbox
 
 _GENERIC_RESPONSE_MARKERS = (
     "agent disponible pour",
