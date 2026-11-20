@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter
 
 from core.modules.self_model import get_self_model
@@ -8,15 +10,21 @@ from core.modules.self_model import get_self_model
 router = APIRouter(prefix="/selfmodel", tags=["selfmodel"])
 
 
-def _snapshot() -> dict:
+def _snapshot_sync() -> dict:
     model = get_self_model()
     model.refresh()
     return model.to_dict()
 
 
+async def _snapshot_async() -> dict:
+    # Hors de l'event loop : le snapshot appelle systemctl (cf.
+    # core/api/self_model_routes.py).
+    return await asyncio.to_thread(_snapshot_sync)
+
+
 @router.get("/status")
 async def status() -> dict:
-    data = _snapshot()
+    data = await _snapshot_async()
     return {
         "health": data["health"],
         "runtime_mode": data["runtime_mode"],
@@ -29,27 +37,27 @@ async def status() -> dict:
 
 @router.get("/identity")
 async def identity() -> dict:
-    return _snapshot()["identity"]
+    return (await _snapshot_async())["identity"]
 
 
 @router.get("/capabilities")
 async def capabilities() -> dict:
-    return _snapshot()["capabilities"]
+    return (await _snapshot_async())["capabilities"]
 
 
 @router.get("/providers")
 async def providers() -> dict:
-    return _snapshot()["providers"]
+    return (await _snapshot_async())["providers"]
 
 
 @router.get("/services")
 async def services() -> dict:
-    return _snapshot()["registered_services"]
+    return (await _snapshot_async())["registered_services"]
 
 
 @router.get("/agents")
 async def agents() -> dict:
-    data = _snapshot()
+    data = await _snapshot_async()
     return {
         **data["agent_topology"],
         "registry": data["agents"],
@@ -59,12 +67,12 @@ async def agents() -> dict:
 
 @router.get("/memory")
 async def memory() -> dict:
-    return _snapshot()["memory"]
+    return (await _snapshot_async())["memory"]
 
 
 @router.get("/goals")
 async def goals() -> dict:
-    data = _snapshot()
+    data = await _snapshot_async()
     return {
         "engine": data["goal_engine"],
         "runtime": data["goal"],
@@ -74,4 +82,4 @@ async def goals() -> dict:
 
 @router.get("/architecture")
 async def architecture() -> dict:
-    return _snapshot()["architecture"]
+    return (await _snapshot_async())["architecture"]
