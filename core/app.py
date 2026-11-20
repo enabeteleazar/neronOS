@@ -133,6 +133,8 @@ _OPTIONAL_ROUTER_SPECS = [
     ("world_model", "core.api.world_model_routes", True),
     ("action_history", "core.api.action_history_routes", True),
     ("critic_history", "core.api.critic_history_routes", True),
+    # POST /notify : contrat HTTP de neronReminders (rétabli, cf. 5572c95).
+    ("notify", "core.api.notify_routes", True),
 ]
 _EXTERNAL_ROUTER_SPECS = [
     ("tools", "tools.routes", False),
@@ -696,6 +698,7 @@ for router, kwargs in [
     (globals().get("capabilities_router"), {}),
     (globals().get("action_history_router"), {"dependencies": _INTERNAL_AUTH}),
     (globals().get("critic_history_router"), {"dependencies": _INTERNAL_AUTH}),
+    (globals().get("notify_router"), {}),
     (globals().get("code_awareness_router"), {"dependencies": _INTERNAL_AUTH}),
     (globals().get("evolution_router"), {}),
     (globals().get("memory_router"), {"dependencies": _INTERNAL_AUTH}),

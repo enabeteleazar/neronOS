@@ -38,6 +38,7 @@ class Intent(str, Enum):
 
     SYSTEM_STATUS        = "system_status"
     NETWORK_STATUS       = "network_status"
+    PC_REMOTE            = "pc_remote_action"
     IDENTITY_QUERY       = "identity_query"
     SELF_STATUS          = "self_status"
     MEMORY_SEARCH        = "memory_search"

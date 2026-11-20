@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import shlex
@@ -140,6 +141,7 @@ class CoreOrchestrator:
         memory_result = detect_memory_intent(routing_query)
         knowledge_result = detect_knowledge_intent(routing_query)
         gateway_domain = _detect_gateway_domain(routing_query)
+        pc_remote_match = _detect_pc_remote_action(routing_query)
         agent_invocation = _parse_agent_invocation(query)
 
         if normalized == "/help":
@@ -297,6 +299,21 @@ class CoreOrchestrator:
                 requires_resolver=True,
                 requires_governor=True,
             )
+        elif pc_remote_match:
+            # Même motif que gateway_domain juste au-dessus : le classifieur
+            # confond ces phrases avec system_status (« ouvre »/« ferme »/« pc »
+            # pris pour restart_service/backup). Sans priorité ici, elles sont
+            # captées par status_provider avant d'atteindre _TOOL_INTENTS.
+            # Constaté le 27/09/2026 : « ouvre htop sur mon pc distant » ->
+            # system_status. Rétabli : 48ba388, perdu avec 58ab382.
+            intent_result.intent = Intent.PC_REMOTE
+            decision = OrchestratorDecision(
+                intent=Intent.PC_REMOTE.value,
+                selected_route="tool_router",
+                reason="Commande de contrôle PC distant (pc_remote) détectée de façon déterministe.",
+                complexity="simple",
+                requires_tool=True,
+            )
         elif (
             status_result.get("matched") or intent == Intent.SYSTEM_STATUS
         ) and not memory_result.get("matched"):
@@ -450,6 +467,13 @@ class CoreOrchestrator:
             query,
             explicit_route=explicit_route,
         )
+
+        # UNE seule chaîne de mémorisation par message, après le routage
+        # (cde7ea0 + correction du 08/09, perdus avec 58ab382). En tâche de
+        # fond : le juge LLM de memory peut prendre des dizaines de secondes,
+        # la réponse à l'utilisateur ne l'attend pas.
+        if query and _message_a_observer(decision):
+            self._schedule_observe(query)
 
         if decision.requires_governor:
             governor = self._get_runtime_governor()
@@ -1028,6 +1052,77 @@ class CoreOrchestrator:
 
         return result["response"], provider.name, metadata
 
+    async def _fetch_memory_context(self, query: str) -> str | None:
+        """Résumé mémoire (Oblivia) à injecter dans le prompt de conversation
+        générale. Fail-open : ne doit jamais bloquer ni faire échouer la
+        conversation si le service memory est indisponible ou lent.
+        Rétabli : cde7ea0, perdu avec 58ab382."""
+        del query
+        providers = provider_registry.by_type("memory")
+        provider_info = providers[0] if providers else None
+        if provider_info is None:
+            return None
+        provider = provider_registry.get(provider_info.name)
+        if provider is None:
+            return None
+        try:
+            response = await asyncio.wait_for(
+                provider.execute(
+                    ProviderRequest(
+                        action="recall",
+                        payload={"query": "que sais tu de moi", "limit": 10},
+                    ),
+                ),
+                timeout=5.0,
+            )
+        except Exception:
+            logger.warning("memory_context_fetch_failed", exc_info=True)
+            return None
+        if response.error:
+            return None
+        result = response.result if isinstance(response.result, dict) else {}
+        answer = result.get("answer")
+        return str(answer) if answer else None
+
+    def _schedule_observe(self, query: str) -> None:
+        """Envoie le message brut à POST /memory/observe en tâche de fond.
+
+        La version d'origine attendait jusqu'à 3 s avant de répondre, puis
+        abandonnait la requête alors que memory continuait de la traiter :
+        jusqu'à 3 s de latence ajoutée à chaque message, sans garantie que
+        l'observation aboutisse. Une référence est gardée pour que la tâche
+        ne soit pas collectée en cours de route.
+        """
+        try:
+            task = asyncio.get_running_loop().create_task(
+                self._send_to_oblivia_observe(query)
+            )
+        except RuntimeError:  # pas de boucle active (appel synchrone)
+            return
+        _OBSERVE_TASKS.add(task)
+        task.add_done_callback(_OBSERVE_TASKS.discard)
+
+    async def _send_to_oblivia_observe(self, query: str) -> None:
+        providers = provider_registry.by_type("memory")
+        provider_info = providers[0] if providers else None
+        if provider_info is None:
+            return
+        provider = provider_registry.get(provider_info.name)
+        if provider is None:
+            return
+        try:
+            await asyncio.wait_for(
+                provider.execute(
+                    ProviderRequest(
+                        action="observe",
+                        payload={"text": query, "source": "utilisateur"},
+                    ),
+                ),
+                timeout=260.0,
+            )
+        except Exception:
+            logger.warning("oblivia_observe_forward_failed", exc_info=True)
+
     async def _execute_llm_provider(
         self,
         query: str,
@@ -1055,11 +1150,19 @@ class CoreOrchestrator:
                 {**metadata, "error": "llm provider unavailable"},
             )
 
+        memory_context = await self._fetch_memory_context(query)
+        prompt = (
+            f"Contexte connu sur l'utilisateur : {memory_context}\n\n{query}"
+            if memory_context
+            else query
+        )
+        metadata["memory_context_used"] = bool(memory_context)
+
         provider_response = await provider.execute(
             ProviderRequest(
                 action="generate",
                 payload={
-                    "prompt": query,
+                    "prompt": prompt,
                     "task_type": "chat",
                     "context": {},
                     "model_preference": "auto",
@@ -1267,6 +1370,7 @@ _TOOL_INTENTS = {
     Intent.AGENT_RUN,
     Intent.PROJECT_STATUS,
     Intent.PROJECT_LIST,
+    Intent.PC_REMOTE,
 }
 
 
@@ -1537,6 +1641,29 @@ def _extract_memory_remember_content(query: str) -> str:
     return normalized
 
 
+_OBSERVE_TASKS: set[asyncio.Task] = set()
+
+# Routes dont le message n'est PAS envoyé à /memory/observe.
+_ROUTES_SANS_OBSERVATION = frozenset({
+    # La route mémoire fait déjà le travail (correction du 08/09/2026) :
+    # - écriture : « Retiens que mon vélo est un Decathlon Riverside. »
+    #   déclenchait les deux chaînes d'extraction et produisait
+    #   `habite_a = Riverside` ;
+    # - lecture : la question était stockée avant la recherche et
+    #   ressortait dans sa propre réponse.
+    "memory_provider",
+    # Rien à apprendre, et chaque observation lance une génération Ollama
+    # côté memory : sur 2 cœurs sans GPU, un « Bonjour » observé occupait le
+    # modèle pendant la réponse suivante.
+    "smalltalk",
+    "help_provider",
+})
+
+
+def _message_a_observer(decision: OrchestratorDecision) -> bool:
+    return decision.selected_route not in _ROUTES_SANS_OBSERVATION
+
+
 def _memory_provider_action(
     query: str,
     memory_result: dict[str, Any],
@@ -1645,6 +1772,47 @@ def _detect_gateway_domain(query: str) -> str | None:
     return None
 
 
+_PC_REMOTE_ACTION_MARKERS = {
+    "ouvre", "ouvrir", "lance", "lancer", "demarre", "demarrer",
+    "ferme", "fermer", "arrete", "arreter", "stoppe", "stopper",
+    "tue", "tuer", "liste", "lister", "affiche", "afficher",
+    "montre", "montrer",
+}
+
+_PC_REMOTE_EXPLICIT_PHRASES = (
+    "pc distant", "ordinateur distant", "commande mon pc",
+    "sur mon pc", "sur le serveur",
+)
+
+
+def _detect_pc_remote_action(query: str) -> bool:
+    """Commande de contrôle PC distant (tool pc_remote), détectée de façon
+    déterministe : un verbe d'action ET (une formule explicite OU le nom/id
+    d'un PC déclaré dans neron.yaml, pc_remote.devices).
+
+    Le PC est piloté en HTTP via son agent neronRemote : compatible avec un
+    Core et un PC sur des machines distinctes. Registre illisible ou
+    pc_remote désactivé : pas de détection, jamais d'exception.
+    """
+    if not (set(query.split()) & _PC_REMOTE_ACTION_MARKERS):
+        return False
+
+    if any(phrase in query for phrase in _PC_REMOTE_EXPLICIT_PHRASES):
+        return True
+
+    try:
+        from integrations.pc_remote.config import load_devices
+
+        devices = load_devices().values()
+    except Exception:
+        return False
+
+    for device in devices:
+        if device.id.replace("_", " ") in query or _normalize(device.name) in query:
+            return True
+    return False
+
+
 def _requires_goal_pipeline(query: str) -> bool:
     return any(
         token in query
@@ -1741,6 +1909,7 @@ def _executor_for_intent(intent: Intent) -> str:
     return {
         Intent.WEB_SEARCH: "web_agent",
         Intent.HA_ACTION: "ha_agent",
+        Intent.PC_REMOTE: "pc_remote_agent",
         Intent.CODE: "code_agent",
         Intent.CODE_AUDIT: "code_audit_agent",
         Intent.SYSTEM_STATUS: "system_agent",
