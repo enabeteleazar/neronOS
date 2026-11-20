@@ -32,12 +32,8 @@ class CapabilityResolver:
         *,
         registry: CapabilityRegistry | None = None,
         router: CapabilityRouter | None = None,
-        goal_manager: Any | None = None,
-        execution_engine: Any | None = None,
-        background_runner: Any | None = None,
+        goal_client: Any | None = None,
         runtime_manager: Any | None = None,
-        tool_creator: Any | None = None,
-        task_scheduler: Any | None = None,
         intent_provider: IntentProvider | None = None,
         matcher: CapabilityMatcher | None = None,
         decision_engine: DecisionEngine | None = None,
@@ -47,12 +43,10 @@ class CapabilityResolver:
         self.intent_provider = intent_provider or RuleBasedIntentProvider()
         self.matcher = matcher or CapabilityMatcher()
         self.decision_engine = decision_engine or DecisionEngine()
-        self._goal_manager = goal_manager
-        self._execution_engine = execution_engine
-        self._background_runner = background_runner
+        # Goal (création d'outils/agents, suivi) : client HTTP, jamais d'import
+        # en process. L'exécution d'un agent généré reste locale (runtime).
+        self._goal_client_instance = goal_client
         self._runtime_manager = runtime_manager
-        self._tool_creator = tool_creator
-        self._task_scheduler = task_scheduler
         self._requests: dict[str, CapabilityResult] = {}
         self._analyses: dict[str, ResolverAnalysis] = {}
 
@@ -328,7 +322,12 @@ class CapabilityResolver:
                 self._requests[request_id] = result
         if result is None or not result.goal_id or not result.async_started:
             return result
-        status = self._goal_engine().get_goal_status(result.goal_id)
+        from server.common.goal_client import GoalClientError
+
+        try:
+            status = await self._goal_client().get_goal_status(result.goal_id)
+        except GoalClientError:
+            return result  # Goal injoignable : on garde le dernier état connu
         if not status:
             return result
         current = str(status.get("status") or "pending")
@@ -354,45 +353,13 @@ class CapabilityResolver:
         return result
 
     def _restore_request_result(self, request_id: str) -> CapabilityResult | None:
-        for goal in self._goal_engine().list_goals():
-            metadata = goal.get("metadata") or {}
-            if str(metadata.get("capability_request_id") or "") != request_id:
-                continue
-            creation_type = str(metadata.get("creation_type") or "tool")
-            decision = CapabilityDecision(
-                decision=f"create_{creation_type}",
-                confidence=1.0,
-                reason="Demande de capacité restaurée depuis goal_runs.",
-                capability_type=creation_type,
-                requires_creation=True,
-                creation_type=creation_type,
-                async_required=True,
-            )
-            return CapabilityResult(
-                status=str(goal.get("status") or "pending"),
-                response=ASYNC_RESPONSE,
-                async_started=True,
-                goal_id=str(goal.get("goal_id") or ""),
-                project_id=goal.get("project_id"),
-                agent_slug=goal.get("agent_slug"),
-                request_id=request_id,
-                decision=decision,
-                metadata={
-                    "creation_type": creation_type,
-                    "original_text": metadata.get("capability_original_text") or "",
-                    "required_tools": list(metadata.get("required_tools") or []),
-                    "created_tools": list(metadata.get("created_tools") or []),
-                    "tool_creation_status": metadata.get(
-                        "tool_creation_status",
-                        "not_required",
-                    ),
-                    "scheduler_task_ids": list(
-                        metadata.get("scheduler_task_ids") or []
-                    ),
-                    "task_id": metadata.get("task_id"),
-                    "composite_task_id": metadata.get("composite_task_id"),
-                },
-            )
+        """Demandes en cours : gardées en mémoire seulement.
+
+        La version précédente relisait les objectifs de Goal en process pour
+        retrouver une demande après redémarrage du Core ; l'API HTTP de Goal
+        ne transporte pas l'identifiant de la demande d'origine.
+        """
+        del request_id
         return None
 
     async def _execute_capability(
@@ -541,77 +508,34 @@ class CapabilityResolver:
         request: CapabilityRequest,
         decision: CapabilityDecision,
     ) -> CapabilityResult:
+        """Confie la création de l'outil ou de l'agent à Goal, en HTTP.
+
+        Goal construit (plan, génération, tests, enregistrement) sur sa propre
+        machine (POST /goal, file asynchrone). Le Core ne génère plus de code
+        d'outil dans son processus et n'importe plus goal.* : cette voie
+        échouait en « No module named 'goal' » depuis le retrait des
+        sous-modules.
+        """
+        from server.common.goal_client import GoalClientError
+
         creation_type = decision.creation_type or "tool"
         objective = self._creation_objective(request.text, creation_type)
-        analysis = self._analyses.get(request.request_id)
-        legacy_specs = self._tools().plan_tools_for_request(request.text)
-        if legacy_specs:
-            tool_preparation = self._tools().ensure_tools_for_request(request.text)
-        elif analysis is not None:
-            need = self._tools().plan_need(
-                request.text,
-                domain=analysis.domain.domain,
-                intent=analysis.intent.action,
-                required_tool_slugs=analysis.missing_tools,
-                matched_capability=analysis.matched_agent,
+        try:
+            queued = await self._goal_client().queue_goal(
+                objective, source=f"{request.channel}_capability"
             )
-            tool_preparation = await self._tools().create_from_need(need)
-            tool_preparation["tool_creation_status"] = (
-                "ready"
-                if tool_preparation.get("status") == "completed"
-                else "failed"
+        except GoalClientError as exc:
+            return CapabilityResult(
+                status="failed",
+                response=(
+                    "Goal est injoignable : je ne peux pas lancer la création de "
+                    "cette capacité pour le moment."
+                ),
+                error=str(exc),
+                decision=decision,
             )
-        else:
-            tool_preparation = self._tools().ensure_tools_for_request(request.text)
-        scheduler_chain = self._enqueue_scheduler_chain(
-            request,
-            tool_preparation,
-        )
-        scheduler_tasks = list(scheduler_chain.get("tasks") or [])
-        composite_task = scheduler_chain.get("composite_task")
-        metadata = {
-            "orchestrated": True,
-            "asynchronous": True,
-            "internal_capability_request": True,
-            "capability_request_id": request.request_id,
-            "capability_original_text": request.text,
-            "creation_type": creation_type,
-            "source_channel": request.channel,
-            "user_id": request.user_id,
-            "required_tools": list(tool_preparation.get("required_tools") or []),
-            "created_tools": list(tool_preparation.get("created_tools") or []),
-            "tool_creation_status": str(
-                tool_preparation.get("tool_creation_status") or "not_required"
-            ),
-            "scheduler_task_ids": [
-                task.task_id for task in scheduler_tasks
-            ],
-            "task_id": scheduler_tasks[0].task_id if scheduler_tasks else None,
-            "composite_task_id": (
-                composite_task.task_id if composite_task is not None else None
-            ),
-        }
-        manager = self._goals()
-        goal = manager.create_goal(
-            title=objective,
-            priority="high" if request.channel == "telegram" else "medium",
-            source=f"{request.channel}_capability",
-            metadata=metadata,
-            deduplicate=False,
-        )
-        goal_id = str(goal["id"])
-        manager.update_status(goal_id, "queued", current_step="queued")
-        self._goal_engine().enqueue_goal(
-            goal_id,
-            objective,
-            f"{request.channel}_capability",
-            metadata,
-        )
-        self._runner().submit(
-            goal_id=goal_id,
-            objective=objective,
-            source=f"{request.channel}_capability",
-        )
+
+        goal_id = str(queued.get("goal_id") or "")
         return CapabilityResult(
             status="pending",
             response=(
@@ -627,12 +551,8 @@ class CapabilityResolver:
             metadata={
                 "creation_type": creation_type,
                 "original_text": request.text,
-                "required_tools": metadata["required_tools"],
-                "created_tools": metadata["created_tools"],
-                "tool_creation_status": metadata["tool_creation_status"],
-                "scheduler_task_ids": metadata["scheduler_task_ids"],
-                "task_id": metadata["task_id"],
-                "composite_task_id": metadata["composite_task_id"],
+                "delegated_to": "goal",
+                "goal_status_url": queued.get("status_url"),
             },
         )
 
@@ -721,26 +641,13 @@ class CapabilityResolver:
         self._requests[request.request_id] = result
         return result
 
-    def _goals(self):
-        if self._goal_manager is None:
-            from goal.goals.goal_manager import get_goal_manager
+    def _goal_client(self):
+        if self._goal_client_instance is None:
+            from server.common.goal_client import get_goal_client
 
-            self._goal_manager = get_goal_manager()
-        return self._goal_manager
+            self._goal_client_instance = get_goal_client()
+        return self._goal_client_instance
 
-    def _goal_engine(self):
-        if self._execution_engine is None:
-            from goal.goals.execution_engine import get_goal_execution_engine
-
-            self._execution_engine = get_goal_execution_engine()
-        return self._execution_engine
-
-    def _runner(self):
-        if self._background_runner is None:
-            from goal.goals.background_runner import get_goal_background_runner
-
-            self._background_runner = get_goal_background_runner()
-        return self._background_runner
 
     def _runtime(self):
         if self._runtime_manager is None:
@@ -755,66 +662,6 @@ class CapabilityResolver:
             result = await runtime.run_agent(agent_slug, text)
             return result.to_dict() if hasattr(result, "to_dict") else dict(result)
         return await runtime.run(agent_slug, text)
-
-    def _tools(self):
-        if self._tool_creator is None:
-            from tools.creator import get_tool_creator
-
-            self._tool_creator = get_tool_creator()
-        return self._tool_creator
-
-    def _scheduler(self):
-        if self._task_scheduler is None:
-            from modules.scheduler.scheduler import get_task_scheduler
-
-            self._task_scheduler = get_task_scheduler()
-        return self._task_scheduler
-
-    def _enqueue_scheduler_chain(
-        self,
-        request: CapabilityRequest,
-        tool_preparation: dict[str, Any],
-    ) -> dict[str, Any]:
-        required_tools = list(tool_preparation.get("required_tools") or [])
-        if required_tools != [
-            "neron_log_reader_tool",
-            "neron_log_error_filter_tool",
-            "neron_log_summary_tool",
-        ]:
-            return {"tasks": [], "composite_task": None}
-        nested_payload = request.metadata.get("payload")
-        initial_payload = (
-            dict(nested_payload)
-            if isinstance(nested_payload, dict)
-            else dict(request.metadata)
-        )
-        scheduler = self._scheduler()
-        tasks = scheduler.enqueue_tool_chain(
-            required_tools,
-            initial_payload=initial_payload,
-            title="Analyse des logs Néron",
-            priority="high" if request.channel == "telegram" else "medium",
-            metadata={
-                "capability_request_id": request.request_id,
-                "source_channel": request.channel,
-                "user_id": request.user_id,
-            },
-        )
-        composite = scheduler.enqueue_composite_task(
-            title="Résultat de l’analyse des logs Néron",
-            depends_on=[tasks[-1].task_id],
-            priority="high" if request.channel == "telegram" else "medium",
-            metadata={
-                "capability_request_id": request.request_id,
-                "source_channel": request.channel,
-                "user_id": request.user_id,
-                "chain_id": (
-                    getattr(tasks[0], "metadata", {}) or {}
-                ).get("chain_id"),
-            },
-        )
-        scheduler.wake_worker()
-        return {"tasks": tasks, "composite_task": composite}
 
     def _easter_date(self, year: int) -> date:
         a = year % 19

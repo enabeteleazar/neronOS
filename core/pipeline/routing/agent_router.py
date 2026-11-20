@@ -188,19 +188,30 @@ def _get_self_model():
     return get_self_model()
 
 
-def _list_dynamic_agents() -> str:
-    from agents.factory.registry import DynamicAgentRegistry, AGENT_REGISTRY
+# Gestion des agents générés : Goal, en HTTP. Le registre et les fichiers
+# d'agents vivent sur la machine de Goal ; les lire depuis le disque du Core
+# donnait un état faux dès que les deux tournent sur des serveurs distincts.
+# Restent locales (dette assumée, pas de route Goal) : exécution d'un agent
+# généré (_run_dynamic_agent), promotion (_promote_dynamic_agent).
+_GOAL_UNREACHABLE = "Goal est injoignable : impossible de {action} pour le moment."
 
-    registry = DynamicAgentRegistry()
-    registry.load_generated_agents()
 
-    agents = sorted(AGENT_REGISTRY.keys())
+async def _list_dynamic_agents() -> str:
+    """Agents générés, listés par Goal (GET /agents) : ils vivent sur sa machine."""
+    from server.common.goal_client import GoalClientError, get_goal_client
 
+    try:
+        payload = await get_goal_client().list_agents()
+    except GoalClientError:
+        return _GOAL_UNREACHABLE.format(action="lister les agents")
+
+    agents = sorted(payload.get("agents") or [])
     if not agents:
         return "Aucun agent dynamique chargé."
 
+    disabled = set(payload.get("disabled") or [])
     lines = ["Agents dynamiques disponibles :"]
-    lines.extend(f"- {name}" for name in agents)
+    lines.extend(f"- {name}" + (" (désactivé)" if name in disabled else "") for name in agents)
 
     return "\n".join(lines)
 
@@ -222,26 +233,32 @@ def _is_registry_invalid_query(query: str) -> bool:
 
 
 async def _scan_agent_registry_text() -> str:
-    from agents.runtime.runtime import get_agent_runtime
+    from server.common.goal_client import GoalClientError, get_goal_client
 
-    runtime = get_agent_runtime()
-    result = runtime.registry.scan()
-    runtime.reload()
+    try:
+        result = await get_goal_client().scan_agents()
+    except GoalClientError:
+        return _GOAL_UNREACHABLE.format(action="scanner les agents")
+    reload_ok = bool((result.get("runtime_reload") or {}).get("ok", result.get("runtime_reloaded")))
     return "\n".join(
         [
             "Scan agents terminé.",
             f"Agents scannés : {result.get('scanned', 0)}.",
             f"Actifs : {result.get('active', 0)}.",
             f"Invalides : {result.get('invalid', 0)}.",
-            "Runtime rechargé : OK.",
+            f"Runtime rechargé : {'OK' if reload_ok else 'non'}.",
         ]
     )
 
 
-def _agent_registry_records() -> list[dict[str, Any]]:
-    from agents.factory.registry import DynamicAgentRegistry
+async def _agent_registry_records() -> list[dict[str, Any]] | None:
+    """Index de validation des agents, lu chez Goal ; None si injoignable."""
+    from server.common.goal_client import GoalClientError, get_goal_client
 
-    index = DynamicAgentRegistry().validation_index()
+    try:
+        index = await get_goal_client().agent_registry_index()
+    except GoalClientError:
+        return None
     agents = index.get("agents") if isinstance(index, dict) else {}
     if not isinstance(agents, dict):
         return []
@@ -251,8 +268,10 @@ def _agent_registry_records() -> list[dict[str, Any]]:
     )
 
 
-def _agent_registry_index_text() -> str:
-    records = _agent_registry_records()
+async def _agent_registry_index_text() -> str:
+    records = await _agent_registry_records()
+    if records is None:
+        return _GOAL_UNREACHABLE.format(action="lire l'index des agents")
     if not records:
         return "Index agents vide."
 
@@ -264,8 +283,11 @@ def _agent_registry_index_text() -> str:
     return "\n".join(lines)
 
 
-def _invalid_agent_registry_text() -> str:
-    invalid = [record for record in _agent_registry_records() if record.get("status") == "invalid"]
+async def _invalid_agent_registry_text() -> str:
+    records = await _agent_registry_records()
+    if records is None:
+        return _GOAL_UNREACHABLE.format(action="lire l'index des agents")
+    invalid = [record for record in records if record.get("status") == "invalid"]
     if not invalid:
         return "Aucun agent invalide."
 
@@ -278,16 +300,25 @@ def _invalid_agent_registry_text() -> str:
 
 
 async def _build_tracked_agent(query: str, source_channel: str = "api") -> str:
-    from agents.factory.build_orchestrator import AgentBuildOrchestrator
+    """Construction d'agent confiée à Goal (POST /agents/build)."""
+    from server.common.goal_client import GoalClientError, get_goal_client
 
-    orchestrator = AgentBuildOrchestrator()
-    result = await orchestrator.build_from_request(
-        query,
-        requested_by="user",
-        source_channel=source_channel,
-        build_mode="hybrid",
+    try:
+        result = await get_goal_client().build_agent(
+            query,
+            requested_by="user",
+            source_channel=source_channel,
+            build_mode="hybrid",
+        )
+    except GoalClientError:
+        return _GOAL_UNREACHABLE.format(action="construire cet agent")
+    if result.get("response"):
+        return str(result["response"])
+    project = result.get("project") or {}
+    return (
+        f"Construction d'agent : {project.get('status') or result.get('status') or 'en cours'}"
+        + (f" (projet {project.get('project_id')})." if project.get("project_id") else ".")
     )
-    return result.get("response") or orchestrator.format_project_response(result.get("project"))
 
 
 def _extract_agent_name(query: str, prefixes: list[str]) -> str | None:
@@ -365,14 +396,18 @@ def _extract_agent_update_request(query: str) -> tuple[str, str] | None:
 
 
 async def _update_dynamic_agent(query: str) -> str:
-    from agents.factory.agent_manager import AgentManager
+    """Mise à jour d'un agent confiée à Goal (POST /agents/{nom}/update)."""
+    from server.common.goal_client import GoalClientError, get_goal_client
 
     parsed = _extract_agent_update_request(query)
     if not parsed:
         return "Demande incomplète. Exemple : améliore agent subnet_calculator_agent ajoute le support IPv6"
 
     name, request = parsed
-    result = await AgentManager().update_agent(name, request=request)
+    try:
+        result = await get_goal_client().update_agent(name, request)
+    except GoalClientError:
+        return _GOAL_UNREACHABLE.format(action=f"mettre à jour l'agent {name}")
 
     if result.get("status") == "updated":
         tests_ok = (result.get("test_result") or {}).get("returncode") == 0
@@ -527,10 +562,10 @@ class AgentRouter:
             return await _scan_agent_registry_text()
 
         if _is_registry_invalid_query(query):
-            return _invalid_agent_registry_text()
+            return await _invalid_agent_registry_text()
 
         if _is_registry_index_query(query):
-            return _agent_registry_index_text()
+            return await _agent_registry_index_text()
 
         if _is_promote_request(query):
             return await _promote_dynamic_agent(query)
@@ -581,7 +616,7 @@ class AgentRouter:
             return _MANAGER_OWNED_TEXT
 
         if intent == Intent.AGENT_LIST:
-            return _list_dynamic_agents()
+            return await _list_dynamic_agents()
 
         if intent == Intent.AGENT_RUN:
             return await _run_dynamic_agent(query)

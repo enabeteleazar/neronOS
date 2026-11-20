@@ -37,57 +37,22 @@ class FakeRuntime:
         return {"ok": True, "agent": name, "response": self.response}
 
 
-class FakeGoalManager:
-    def __init__(self) -> None:
-        self.created = []
-        self.updated = []
+class FakeGoalClient:
+    """Remplace l'API HTTP de Goal (POST /goal, GET /goal/{id}/status)."""
 
-    def create_goal(self, **kwargs):
-        self.created.append(kwargs)
-        return {"id": "goal-capability-1", "metadata": kwargs.get("metadata", {})}
+    def __init__(self, *, error=None) -> None:
+        self.queued = []
+        self.error = error
 
-    def update_status(self, goal_id, status, **kwargs):
-        self.updated.append((goal_id, status, kwargs))
-        return {"id": goal_id, "status": status}
+    async def queue_goal(self, objective, *, source="api"):
+        self.queued.append({"objective": objective, "source": source})
+        if self.error:
+            raise self.error
+        return {"accepted": True, "goal_id": "goal-capability-1", "status": "queued",
+                "status_url": "/goal/goal-capability-1/status"}
 
-
-class FakeExecutionEngine:
-    def __init__(self) -> None:
-        self.enqueued = []
-        self.status = {"goal_id": "goal-capability-1", "status": "queued"}
-
-    def enqueue_goal(self, goal_id, title, source, metadata):
-        self.enqueued.append((goal_id, title, source, metadata))
-        return self.status
-
-    def get_goal_status(self, goal_id):
-        return self.status
-
-
-class FakeBackgroundRunner:
-    def __init__(self) -> None:
-        self.submitted = []
-
-    def submit(self, **kwargs):
-        self.submitted.append(kwargs)
-
-
-class FakeTaskScheduler:
-    def __init__(self) -> None:
-        self.chains = []
-
-    def enqueue_tool_chain(self, tool_slugs, **kwargs):
-        self.chains.append((tool_slugs, kwargs))
-        return [
-            type("Task", (), {"task_id": f"task-{position}"})()
-            for position, _slug in enumerate(tool_slugs)
-        ]
-
-    def enqueue_composite_task(self, **kwargs):
-        return type("Task", (), {"task_id": "task-composite"})()
-
-    def wake_worker(self):
-        return None
+    async def get_goal_status(self, goal_id):
+        return {"goal_id": goal_id, "status": "queued"}
 
 
 def make_registry(*capabilities: Capability) -> CapabilityRegistry:
@@ -133,15 +98,8 @@ async def test_current_date_request_uses_existing_tool():
 
 
 async def test_unknown_simple_request_queues_tool_creation():
-    goals = FakeGoalManager()
-    engine = FakeExecutionEngine()
-    runner = FakeBackgroundRunner()
-    resolver = CapabilityResolver(
-        registry=make_registry(),
-        goal_manager=goals,
-        execution_engine=engine,
-        background_runner=runner,
-    )
+    goal = FakeGoalClient()
+    resolver = CapabilityResolver(registry=make_registry(), goal_client=goal)
 
     result = await resolver.resolve(
         CapabilityRequest(
@@ -157,20 +115,15 @@ async def test_unknown_simple_request_queues_tool_creation():
     assert result.response == ASYNC_RESPONSE
     assert result.decision is not None
     assert result.decision.decision == "create_tool"
-    assert goals.created[0]["metadata"]["creation_type"] == "tool"
-    assert runner.submitted[0]["goal_id"] == "goal-capability-1"
+    assert result.goal_id == "goal-capability-1"
+    assert result.metadata["creation_type"] == "tool"
+    assert result.metadata["delegated_to"] == "goal"
+    assert goal.queued[0]["source"] == "telegram_capability"
 
 
 async def test_durable_request_queues_agent_creation():
-    goals = FakeGoalManager()
-    engine = FakeExecutionEngine()
-    runner = FakeBackgroundRunner()
-    resolver = CapabilityResolver(
-        registry=make_registry(),
-        goal_manager=goals,
-        execution_engine=engine,
-        background_runner=runner,
-    )
+    goal = FakeGoalClient()
+    resolver = CapabilityResolver(registry=make_registry(), goal_client=goal)
 
     result = await resolver.resolve(
         CapabilityRequest(text="Surveille mon serveur et préviens-moi si le disque dépasse 85 %")
@@ -181,22 +134,13 @@ async def test_durable_request_queues_agent_creation():
     assert result.decision.decision == "create_agent"
     assert result.async_started is True
     assert result.goal_id == "goal-capability-1"
-    assert goals.created[0]["metadata"]["creation_type"] == "agent"
-    assert goals.created[0]["metadata"]["internal_capability_request"] is True
+    assert result.metadata["creation_type"] == "agent"
+    assert len(goal.queued) == 1
 
 
 async def test_unknown_automatic_log_analysis_queues_agent_creation():
-    goals = FakeGoalManager()
-    engine = FakeExecutionEngine()
-    runner = FakeBackgroundRunner()
-    scheduler = FakeTaskScheduler()
-    resolver = CapabilityResolver(
-        registry=make_registry(),
-        goal_manager=goals,
-        execution_engine=engine,
-        background_runner=runner,
-        task_scheduler=scheduler,
-    )
+    goal = FakeGoalClient()
+    resolver = CapabilityResolver(registry=make_registry(), goal_client=goal)
 
     result = await resolver.resolve(
         CapabilityRequest(
@@ -211,22 +155,14 @@ async def test_unknown_automatic_log_analysis_queues_agent_creation():
     assert result.async_started is True
     assert result.goal_id == "goal-capability-1"
     assert result.response == ASYNC_AGENT_RESPONSE
-    assert engine.enqueued[0][3]["internal_capability_request"] is True
-    assert len(engine.enqueued[0][3]["scheduler_task_ids"]) == 3
-    assert engine.enqueued[0][3]["task_id"] == "task-0"
-    assert engine.enqueued[0][3]["composite_task_id"] == "task-composite"
+    # La préparation des outils et leur planification relèvent de Goal :
+    # le Core ne fait qu'un appel HTTP.
+    assert goal.queued[0]["source"] == "telegram_capability"
 
 
 async def test_unknown_punctual_analysis_queues_tool_creation():
-    goals = FakeGoalManager()
-    engine = FakeExecutionEngine()
-    runner = FakeBackgroundRunner()
-    resolver = CapabilityResolver(
-        registry=make_registry(),
-        goal_manager=goals,
-        execution_engine=engine,
-        background_runner=runner,
-    )
+    goal = FakeGoalClient()
+    resolver = CapabilityResolver(registry=make_registry(), goal_client=goal)
 
     result = await resolver.resolve(
         CapabilityRequest(
@@ -240,7 +176,25 @@ async def test_unknown_punctual_analysis_queues_tool_creation():
     assert result.decision.decision == "create_tool"
     assert result.async_started is True
     assert result.goal_id == "goal-capability-1"
-    assert goals.created[0]["metadata"]["creation_type"] == "tool"
+    assert result.metadata["creation_type"] == "tool"
+
+
+async def test_creation_reports_unreachable_goal():
+    from server.common.goal_client import GoalClientError
+
+    resolver = CapabilityResolver(
+        registry=make_registry(),
+        goal_client=FakeGoalClient(error=GoalClientError("refusé")),
+    )
+
+    result = await resolver.resolve(
+        CapabilityRequest(text="Convertis ce nombre dans un format propriétaire")
+    )
+
+    assert result is not None
+    assert result.status == "failed"
+    assert result.async_started is False
+    assert "Goal est injoignable" in result.response
 
 
 async def test_existing_durable_agent_is_executed():

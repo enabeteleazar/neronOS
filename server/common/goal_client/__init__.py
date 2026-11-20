@@ -149,6 +149,48 @@ class GoalClient:
         assert result is not None
         return result
 
+    async def scan_agents(self) -> dict[str, Any]:
+        result = await self._request("POST", "/agents/registry/scan")
+        assert result is not None
+        return result
+
+    async def agent_registry_index(self) -> dict[str, Any]:
+        result = await self._request("GET", "/agents/registry/index")
+        assert result is not None
+        return result
+
+    async def update_agent(self, agent_name: str, request: str) -> dict[str, Any]:
+        # Relance les tests de l'agent côté Goal : plusieurs minutes possibles.
+        client = GoalClient(base_url=self.base_url, api_key=self.api_key, timeout=300.0, transport=self._transport)
+        result = await client._request(
+            "POST", f"/agents/{quote(agent_name, safe='')}/update", json={"request": request}
+        )
+        assert result is not None
+        return result
+
+    async def build_agent(
+        self,
+        query: str,
+        *,
+        requested_by: str = "user",
+        source_channel: str = "api",
+        build_mode: str = "hybrid",
+    ) -> dict[str, Any]:
+        # Construction synchrone côté Goal (génération, tests, enregistrement).
+        client = GoalClient(base_url=self.base_url, api_key=self.api_key, timeout=900.0, transport=self._transport)
+        result = await client._request(
+            "POST",
+            "/agents/build",
+            json={
+                "query": query,
+                "requested_by": requested_by,
+                "source_channel": source_channel,
+                "build_mode": build_mode,
+            },
+        )
+        assert result is not None
+        return result
+
     async def delete_agent(self, agent_name: str) -> dict[str, Any]:
         result = await self._request("POST", f"/agents/{quote(agent_name, safe='')}/delete")
         assert result is not None
