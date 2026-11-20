@@ -153,3 +153,12 @@ patches/
 
 start.sh
 stop.sh
+
+# Modules NéronOS placés sous server/ par system/scripts/setup-modules.sh :
+# dépôts séparés (clones ou liens), jamais versionnés dans neronOS.
+/server/llm
+/server/memory
+/server/goal
+/server/voice
+/server/gateways
+/server/doctor

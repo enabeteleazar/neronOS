@@ -26,10 +26,20 @@ Code porté par le dépôt parent :
 
 ## Initialisation
 
+Depuis le 16/10/2026, neronOS n'a plus de sous-modules : LLM, Memory, Goal,
+Voice, Gateways et Doctor sont des dépôts séparés, que le lanceur attend sous
+`server/<module>`. `setup-modules.sh` les y place (clone, ou lien vers des
+clones locaux) et peut préparer l'environnement Python :
+
 ```bash
 cd /etc/neronOS
-git submodule update --init --recursive
+system/scripts/setup-modules.sh --venv /etc/neronOS/venv   # production
+system/scripts/setup-modules.sh --link /srv/Neron --venv   # développement
+system/scripts/setup-modules.sh --check                    # état, sans rien modifier
 ```
+
+Hors systemd, un module se lance avec `system/scripts/start-module.sh <module>`
+(`start-core.sh` en est le raccourci pour le Core).
 
 ## Démarrage
 
