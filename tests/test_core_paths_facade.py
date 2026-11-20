@@ -37,4 +37,7 @@ def test_find_neron_home_falls_back_to_directory_scan(monkeypatch):
 
     home = common_paths.find_neron_home()
 
-    assert (home / "server" / "core").exists()
+    # Dépôt unique depuis le 16/10 : core/ à la racine (server/core/ reste
+    # reconnu pour l'ancienne disposition en sous-modules).
+    assert (home / "core").is_dir() or (home / "server" / "core").is_dir()
+    assert (home / "neron.yaml").exists() or (home / "neron.server.yaml").exists()
