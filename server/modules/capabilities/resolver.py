@@ -117,6 +117,8 @@ class CapabilityResolver:
             return self._remember(request, self._propose_gateway_connection(decision))
         if decision.decision == "no_gateway_available":
             return self._remember(request, self._no_gateway_available(decision))
+        if decision.decision == "gateway_unavailable":
+            return self._remember(request, self._gateway_unavailable(decision))
         return None
 
     def decide(self, request: CapabilityRequest) -> CapabilityDecision | None:
@@ -188,6 +190,7 @@ class CapabilityResolver:
             "use_gateway",
             "propose_gateway_connection",
             "no_gateway_available",
+            "gateway_unavailable",
         }:
             return CapabilityDecision(
                 decision=analysis.decision,
@@ -458,26 +461,41 @@ class CapabilityResolver:
         decision: CapabilityDecision,
         connector: Any,
     ) -> CapabilityResult:
-        import asyncio
-
-        from gateways.actions import (
-            GatewayActionError,
-            fetch_upcoming_calendar_events,
-            format_events_for_response,
+        """Agenda Google, lu par le service gateways (qui détient le jeton
+        OAuth) et non plus dans le processus du Core."""
+        from server.common.gateways_client import (
+            GatewayActionFailed,
+            GatewaysUnavailable,
+            get_gateways_client,
         )
 
         try:
-            events = await asyncio.to_thread(fetch_upcoming_calendar_events)
-        except GatewayActionError as exc:
+            result = await get_gateways_client().google_calendar_upcoming()
+        except GatewayActionFailed as exc:
             return CapabilityResult(
                 status="failed",
                 response=f"Je n’ai pas pu récupérer ton agenda {connector.name} : {exc}",
                 error=str(exc),
                 decision=decision,
             )
+        except GatewaysUnavailable as exc:
+            return self._gateway_unavailable(decision, error=str(exc))
         return CapabilityResult(
             status="completed",
-            response=format_events_for_response(events),
+            response=str(result.get("text") or ""),
+            decision=decision,
+        )
+
+    def _gateway_unavailable(
+        self, decision: CapabilityDecision, *, error: str | None = None
+    ) -> CapabilityResult:
+        return CapabilityResult(
+            status="failed",
+            response=(
+                "Le service des passerelles est injoignable pour le moment : "
+                "je ne peux pas traiter cette demande. Réessaie dans un instant."
+            ),
+            error=error or decision.reason or "gateway_unavailable",
             decision=decision,
         )
 
@@ -507,11 +525,16 @@ class CapabilityResolver:
         )
 
     def _gateway_connector(self, connector_id: str | None) -> Any | None:
+        """Connecteur lu en HTTP (GET /gateways/{id}) ; None s'il est inconnu
+        ou si le service est injoignable."""
         if not connector_id:
             return None
-        from gateways.registry import get_registry
+        from server.common.gateways_client import GatewaysUnavailable, get_gateways_client
 
-        return get_registry().get(connector_id)
+        try:
+            return get_gateways_client().get_connector(connector_id)
+        except GatewaysUnavailable:
+            return None
 
     async def _queue_creation(
         self,

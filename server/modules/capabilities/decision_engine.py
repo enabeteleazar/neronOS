@@ -5,7 +5,7 @@ from typing import Any, Callable
 from modules.capabilities.models import CapabilityMatch, IntentUnderstanding
 from modules.capabilities.router import normalize_text
 
-GatewayMatch = tuple[Any, Any]  # (gateways.models.Connector, gateways.models.ConnectorState)
+GatewayMatch = tuple[Any, Any]  # (GatewayConnector, GatewayState), cf. server.common.gateways_client
 GatewayLookup = Callable[[str], list[GatewayMatch]]
 
 # Domaines dont la resolution appartient au registre de passerelles
@@ -21,20 +21,17 @@ GATEWAY_DOMAINS = {
 
 
 def _default_gateway_lookup(domain: str) -> list[GatewayMatch]:
-    """Interroge le registre de passerelles (server/gateways) pour ce domaine.
+    """Interroge le service gateways, en HTTP, pour ce domaine.
 
-    Import tardif : `gateways` ne doit pas devenir une dependance de
-    chargement de `modules.capabilities`, seulement un service consulte a la
-    demande (comme `goal`, `agents`, `tools` ailleurs dans ce module).
+    Le registre et l'état des connexions vivent sur la machine de Gateways
+    (GET /gateways/domain/{domain}). L'import direct du paquet gateways ne
+    fonctionnait plus depuis le retrait des sous-modules (16/10) : chaque
+    demande de passerelle échouait en « No module named 'gateways' ».
+    Lève GatewaysUnavailable si le service ne répond pas.
     """
-    from gateways.registry import get_registry
-    from gateways.store import ConnectionStore
+    from server.common.gateways_client import get_gateways_client
 
-    connectors = get_registry().find_by_domain(domain)
-    if not connectors:
-        return []
-    store = ConnectionStore()
-    return [(connector, store.get_state(connector.id)) for connector in connectors]
+    return get_gateways_client().find_by_domain(domain)
 
 
 class DecisionEngine:
@@ -129,7 +126,19 @@ class DecisionEngine:
         )
 
     def _decide_gateway(self, domain: Any) -> tuple[str, float, str, dict[str, Any]] | None:
-        matches = self._gateway_lookup(domain.domain)
+        from server.common.gateways_client import GatewaysUnavailable
+
+        try:
+            matches = self._gateway_lookup(domain.domain)
+        except GatewaysUnavailable as exc:
+            # Distinct de « aucune passerelle » : le service ne répond pas,
+            # on ne sait pas si un connecteur couvre le domaine.
+            return (
+                "gateway_unavailable",
+                round(domain.confidence, 3),
+                f"Service gateways injoignable : {exc}",
+                {},
+            )
 
         connected = [(c, s) for c, s in matches if s.status == "connected"]
         if connected:
