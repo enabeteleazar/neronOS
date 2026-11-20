@@ -124,6 +124,7 @@ backups/
 __pycache__/
 *.pyc
 *.bak*
+*.backup
 
 # Néron memory SQLite runtime files
 memory/*.db-shm
