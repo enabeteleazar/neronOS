@@ -8,6 +8,10 @@ os.environ.setdefault("NERON_API_KEY", "test-api-key")
 os.environ["NERON_SANDBOX_BACKEND"] = "python"
 os.environ["NERON_SANDBOX_SYSTEMD_USE_SUDO"] = "false"
 os.environ.setdefault("NERON_TASK_WORKER_ENABLED", "false")
+# Classifieur CamemBERT coupé par défaut : sinon chaque session de tests
+# chargerait (ou téléchargerait, ~440 Mo) le modèle. Couvert par
+# tests/test_intent_classifier_ml.py (marqueur slow), qui le réactive.
+os.environ.setdefault("NERON_INTENT_CLASSIFIER", "0")
 
 _TEST_ROOT = Path(tempfile.mkdtemp(prefix="neron-pytest-"))
 _TEST_DATA = _TEST_ROOT / "data"

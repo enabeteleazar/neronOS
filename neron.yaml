@@ -212,6 +212,23 @@ code_agent:
   self_review_on_startup: false
 
 # ==================================================================
+# CLASSIFIEUR D'INTENTIONS (Core)
+# ==================================================================
+#
+# CamemBERT + 2 classifieurs scikit-learn. Consulte seulement quand la
+# cascade de mots-cles n'a rien reconnu, juste avant un appel LLM.
+# Cout mesure sur cette machine : ~495 Mo de RAM, ~5 s de chargement au
+# demarrage, ~100 ms par phrase. Mettre enabled: false si la RAM manque :
+# Neron retombe sur le routage par mots-cles seul.
+# `model` accepte un identifiant HuggingFace ou un dossier local (serveur
+# sans acces reseau) ; pre-telechargement :
+#   huggingface-cli download almanach/camembert-base
+
+intent_classifier:
+  enabled: true
+  model: almanach/camembert-base
+
+# ==================================================================
 # HOME ASSISTANT
 # ==================================================================
 

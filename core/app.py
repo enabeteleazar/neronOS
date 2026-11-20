@@ -449,6 +449,15 @@ async def lifespan(app: FastAPI):
         logger.info(json.dumps({"event": "startup", "version": VERSION}))
         ensure_default_providers()
 
+        # Classifieur d'intentions CamemBERT : chargé en arrière-plan (~5 s)
+        # pour que la première requête ne le paie pas. Indisponible ou
+        # désactivé (intent_classifier.enabled) : routage par mots-clés seul.
+        from core.pipeline.intent.neron_intent_classifier import get_ml_router
+
+        app.state.intent_classifier_task = asyncio.create_task(
+            asyncio.to_thread(get_ml_router)
+        )
+
         try:
             from modules.scheduler.scheduler import get_task_scheduler
 

@@ -500,11 +500,62 @@ def _fallback_intent(query: str) -> Intent | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Classifieur CamemBERT (target/operation) -> Intent
+#
+# Rétabli après sa perte lors de la réintégration du Core (7259a53 -> 58ab382),
+# mais en COMPLÉMENT et non plus en remplacement : la cascade de mots-clés et
+# le classificateur NLP gardent la main (ils connaissent météo, heure,
+# actualités, que le modèle ignore). Le modèle n'est consulté que lorsque la
+# phrase allait finir en CONVERSATION générique, c'est-à-dire juste avant un
+# appel LLM de 10 à 30 s : ses ~100 ms y sont négligeables.
+#
+# Seules les correspondances sûres changent l'intent. system/restart_service
+# et system/backup étaient mappés sur SYSTEM_STATUS en juillet : une demande
+# de redémarrage recevait un rapport d'état (risque signalé dès l'origine).
+# Ils restent en CONVERSATION ; target/operation sont toujours exposés dans
+# entities pour un futur handler. memory/* reste en CONVERSATION :
+# l'orchestrateur a son propre détecteur mémoire.
+# ---------------------------------------------------------------------------
+
+_ML_TO_INTENT: Dict[tuple[str, str], Intent] = {
+    ("homeassistant", "turn_on_light"): Intent.HA_ACTION,
+    ("homeassistant", "turn_off_light"): Intent.HA_ACTION,
+    ("homeassistant", "open_cover"): Intent.HA_ACTION,
+    ("homeassistant", "close_cover"): Intent.HA_ACTION,
+    ("homeassistant", "get_temperature"): Intent.HA_ACTION,
+    ("goal", "get_status"): Intent.PROJECT_STATUS,
+    ("goal", "create_agent"): Intent.AGENT_CREATION,
+    ("system", "get_logs"): Intent.SYSTEM_STATUS,
+}
+
+
+async def _ml_classify(text: str) -> dict[str, Any] | None:
+    """Prédiction du classifieur hors de la boucle asyncio, ou None."""
+    import asyncio
+
+    from core.pipeline.intent.neron_intent_classifier import get_ml_router
+
+    def _run() -> dict[str, Any] | None:
+        router = get_ml_router()
+        return router.route(text) if router is not None else None
+
+    try:
+        return await asyncio.to_thread(_run)
+    except Exception as exc:
+        logger.warning("intent_classifier_error %s: %s", type(exc).__name__, exc)
+        return None
+
+
 class IntentRouter:
     def __init__(self, llm_agent=None) -> None:
         self.llm_agent = llm_agent
 
-    async def route(self, query: str) -> IntentResult:
+    async def route(self, query: str, *, raw_query: str | None = None) -> IntentResult:
+        """`raw_query` : la phrase d'origine (accents, casse), transmise au
+        classifieur CamemBERT entraîné sur du texte non normalisé. Sur la
+        phrase normalisée, « Montre-moi les logs du service memory » était lu
+        comme un redémarrage."""
         normalized_query = _normalize(query)
         nlp_result = _nlp().process(normalized_query)
 
@@ -520,6 +571,22 @@ class IntentRouter:
             intent = fallback
             intent_str = fallback.value
             score = max(score, 0.98 if fallback == Intent.GREETING else 0.85)
+        elif intent == Intent.CONVERSATION:
+            ml = await _ml_classify(raw_query or query)
+            if ml is not None:
+                entities = {
+                    **entities,
+                    "target": ml["target"],
+                    "operation": ml["operation"],
+                    "routing_method": ml["method"],
+                }
+                ml_intent = _ML_TO_INTENT.get((ml["target"], ml["operation"]))
+                if ml_intent is not None:
+                    intent = ml_intent
+                    intent_str = ml_intent.value
+                    # Règle lexicale déterministe : haute confiance. Prédiction
+                    # ML : 0.7, faute de score calibré (choix du 24/07).
+                    score = max(score, 0.95 if ml["method"] == "lexical_rule" else 0.7)
 
         confidence = (
             "high"

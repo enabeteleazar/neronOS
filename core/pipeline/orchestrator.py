@@ -131,7 +131,7 @@ class CoreOrchestrator:
         explicit_route: str | None = None,
     ) -> tuple[OrchestratorDecision, IntentResult]:
         routing_query = _normalize(query)
-        intent_result = await self.intent_router.route(routing_query)
+        intent_result = await self.intent_router.route(routing_query, raw_query=query)
         intent = intent_result.intent
         normalized = routing_query
         complexity = _complexity(query)

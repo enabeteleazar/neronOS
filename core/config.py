@@ -182,6 +182,12 @@ class Config:
     MEMORY_RETENTION = int(_get(_cfg, "memory", "retention_days",         default=30))
     MEMORY_MAX_ROWS  = int(_get(_cfg, "memory", "max_rows",               default=10_000))
 
+    # ── Classifieur d'intentions CamemBERT ────────────────────────────────
+    # Voir core/pipeline/intent/neron_intent_classifier.py. La variable
+    # NERON_INTENT_CLASSIFIER (0/1) prime sur ce réglage.
+    INTENT_CLASSIFIER_ENABLED = str(_get(_cfg, "intent_classifier", "enabled", default=True)).strip().lower() not in {"0", "false", "no", "off"}
+    INTENT_CLASSIFIER_MODEL   = _get(_cfg, "intent_classifier", "model", fallback_env="NERON_INTENT_CLASSIFIER_MODEL", default="almanach/camembert-base")
+
     # ── Météo ─────────────────────────────────────────────────────────────
     # Lu par server/agents/builtin/io/weather_agent.py. Absent, l'agent
     # retombait silencieusement sur « Paris » quelle que soit la valeur de
