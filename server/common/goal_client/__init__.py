@@ -137,6 +137,12 @@ class GoalClient:
     # Le registre d'agents et leurs fichiers vivent côté Goal, éventuellement
     # sur une autre machine : le Core ne les touche qu'à travers ces routes.
 
+    async def list_agents(self) -> dict[str, Any]:
+        """{"count", "agents": [noms], "disabled": [noms]} (disabled : Goal récent)."""
+        result = await self._request("GET", "/agents")
+        assert result is not None
+        return result
+
     async def set_agent_enabled(self, agent_name: str, enabled: bool) -> dict[str, Any]:
         action = "enable" if enabled else "disable"
         result = await self._request("POST", f"/agents/{quote(agent_name, safe='')}/{action}")

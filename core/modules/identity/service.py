@@ -6,9 +6,11 @@ import re
 from pathlib import Path
 from typing import Any
 
-from core.config.paths import NERON_IDENTITY_PATH
+from core.identity.loader import DEFAULT_IDENTITY_DIR, identity_document_path
 
-NERON_MD_PATH = NERON_IDENTITY_PATH
+# Compatibilité : chemin par défaut. La résolution réelle passe par le loader
+# (_identity_path), pour lire exactement le même NERON.md que get_identity().
+NERON_MD_PATH = DEFAULT_IDENTITY_DIR / "NERON.md"
 MAX_CONTEXT_CHARS = 3600
 MAX_RESPONSE_CHARS = 2200
 LLM_TIMEOUT_SECONDS = 2.5
@@ -45,7 +47,7 @@ def _normalize_kind(kind: str | None) -> str:
 
 
 def _identity_path() -> Path:
-    return Path(os.getenv("NERON_IDENTITY_PATH", str(NERON_MD_PATH)))
+    return identity_document_path()
 
 
 def _read_neron_md() -> tuple[str, str]:
