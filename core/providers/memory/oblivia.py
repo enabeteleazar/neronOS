@@ -99,6 +99,9 @@ class ObliviaProvider(ProviderProtocol):
         "remember": ("POST", "/memory/remember"),
         "update":   ("POST", "/memory/remember"),
         "recall":   ("POST", "/memory/recall"),
+        # Observation d'un message brut (juge LLM côté memory). Rétabli :
+        # 2c72715, perdu avec 58ab382.
+        "observe":  ("POST", "/memory/observe"),
         "search":   ("POST", "/memory/recall"),
         "forget":   ("POST", "/memory/forget"),
         "status":   ("GET", "/status"),
