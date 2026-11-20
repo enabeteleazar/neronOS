@@ -19,6 +19,16 @@ logger = get_logger("voice_proxy")
 # Le service voice ecoute sur son alias loopback dedie (nodes.voice de
 # neron.server.yaml), pas sur 127.0.0.1. Surchargeable par NERON_VOICE_URL.
 VOICE_SERVICE_BASE_URL = os.getenv("NERON_VOICE_URL", "http://127.0.1.5:8045")
+
+
+def _auth_headers() -> dict[str, str]:
+    """Authorization: Bearer <NERON_API_KEY>, exigé par le service depuis
+    l'ajout de son authentification (lu à chaque appel)."""
+    from server.common.auth import api_key_headers
+
+    return api_key_headers(os.getenv("NERON_API_KEY", "").strip())
+
+
 _TIMEOUT = httpx.Timeout(30.0, connect=5.0)
 
 
@@ -33,7 +43,7 @@ class STTAgentProxy:
             "filename": filename,
         }
         try:
-            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            async with httpx.AsyncClient(timeout=_TIMEOUT, headers=_auth_headers()) as client:
                 resp = await client.post(f"{self._base_url}/transcribe", json=payload)
             resp.raise_for_status()
             data = resp.json()
@@ -57,7 +67,7 @@ class STTAgentProxy:
 
     async def reload(self) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            async with httpx.AsyncClient(timeout=_TIMEOUT, headers=_auth_headers()) as client:
                 resp = await client.post(f"{self._base_url}/reload")
             resp.raise_for_status()
             return bool(resp.json().get("stt_reloaded", False))
@@ -67,7 +77,7 @@ class STTAgentProxy:
 
     async def check_connection(self) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(5.0), headers=_auth_headers()) as client:
                 resp = await client.get(f"{self._base_url}/health")
             resp.raise_for_status()
             return bool(resp.json().get("stt_ready", False))
@@ -82,7 +92,7 @@ class TTSAgentProxy:
     async def synthesize(self, text: str) -> AgentResult:
         start = time.monotonic()
         try:
-            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            async with httpx.AsyncClient(timeout=_TIMEOUT, headers=_auth_headers()) as client:
                 resp = await client.post(f"{self._base_url}/synthesize", json={"text": text})
 
             if resp.status_code != 200:
@@ -123,7 +133,7 @@ class TTSAgentProxy:
 
     async def reload(self) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            async with httpx.AsyncClient(timeout=_TIMEOUT, headers=_auth_headers()) as client:
                 resp = await client.post(f"{self._base_url}/reload")
             resp.raise_for_status()
             return bool(resp.json().get("tts_reloaded", False))
@@ -133,7 +143,7 @@ class TTSAgentProxy:
 
     async def check_connection(self) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(5.0), headers=_auth_headers()) as client:
                 resp = await client.get(f"{self._base_url}/health")
             resp.raise_for_status()
             return bool(resp.json().get("tts_ready", False))

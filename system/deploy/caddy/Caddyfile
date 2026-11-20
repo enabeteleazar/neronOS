@@ -28,10 +28,15 @@ homebox.tail7f8e60.ts.net {
 		reverse_proxy 127.0.0.1:18789
 	}
 
-	# STT volontairement non authentifie (deja le cas cote client avant ce
-	# changement) : microservice sans acces aux capacites sensibles du Core.
+	# Le service voice exige desormais Authorization: Bearer <NERON_API_KEY>
+	# (voice/security.py) : sans injection ici, la transcription du Dashboard
+	# recevrait 401. Il etait laisse ouvert parce qu'il n'avait pas acces aux
+	# capacites du Core, mais il restait joignable par tout processus de la
+	# machine et, sur des serveurs distincts, par le reseau.
 	handle_path /stt/* {
-		reverse_proxy 127.0.1.5:8045
+		reverse_proxy 127.0.1.5:8045 {
+			header_up Authorization "Bearer {$NERON_API_KEY}"
+		}
 	}
 
 	handle_path /memoire/* {

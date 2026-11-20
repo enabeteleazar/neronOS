@@ -12,6 +12,14 @@ from core.providers.models import (
 )
 
 
+def _auth_headers() -> dict[str, str]:
+    """Authorization: Bearer <NERON_API_KEY>, exigé par le service depuis
+    l'ajout de son authentification (lu à chaque appel)."""
+    from server.common.auth import api_key_headers
+
+    return api_key_headers(os.getenv("NERON_API_KEY", "").strip())
+
+
 class ObliviaProvider(ProviderProtocol):
     """
     Remote Memory Provider.
@@ -55,7 +63,7 @@ class ObliviaProvider(ProviderProtocol):
 
     async def health(self) -> ProviderResponse:
         try:
-            async with httpx.AsyncClient(timeout=2) as client:
+            async with httpx.AsyncClient(timeout=2, headers=_auth_headers()) as client:
                 response = await client.get(
                     f"{self.base_url}/health"
                 )
@@ -140,7 +148,7 @@ class ObliviaProvider(ProviderProtocol):
         method, path = self._ACTION_ROUTES.get(request.action, ("POST", "/memory/recall"))
 
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=10, headers=_auth_headers()) as client:
                 if method == "GET":
                     response = await client.get(f"{self.base_url}{path}")
                 else:
