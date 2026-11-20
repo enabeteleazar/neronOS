@@ -1087,7 +1087,31 @@ class CoreOrchestrator:
                 {**metadata, "error": provider_response.error},
             )
 
-        return str(result.get("result") or ""), provider.name, metadata
+        text = str(result.get("result") or "")
+        if not text.strip():
+            # Echec PARTIEL du service LLM : il a repondu 200, donc ni
+            # `raise_for_status` ni `provider_response.error` ne se declenchent,
+            # mais le texte est vide et la cause est releguee en `warning`
+            # (typiquement un ReadTimeout vers Ollama apres retries). Sans ce
+            # garde-fou, Core renvoyait `response: ""` avec `error: null` :
+            # l'appelant ne pouvait pas distinguer une panne d'une reponse
+            # legitimement vide. Mesure du 03/09/2026 : 265 s d'attente pour
+            # une chaine vide et aucune erreur.
+            # Correction initiale 80d6794, perdue lors de la reintegration du
+            # Core (58ab382), retablie ici.
+            cause = result.get("warning") or "reponse vide du service LLM"
+            logger.error(
+                "llm_provider_empty_response provider=%s cause=%s",
+                provider.name,
+                cause,
+            )
+            return (
+                "Le LLM n'a pas produit de reponse. Reessaie dans un instant.",
+                provider.name,
+                {**metadata, "error": str(cause)},
+            )
+
+        return text, provider.name, metadata
 
 
     async def _execute_registry(

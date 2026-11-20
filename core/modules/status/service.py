@@ -30,7 +30,11 @@ def _system_resources() -> dict[str, float | int | str]:
         import psutil
 
         return {
-            "cpu_pct": round(float(psutil.cpu_percent(interval=None)), 1),
+            # interval=None compare au precedent appel : au premier appel (ou
+            # quand rien d'autre n'a mesure entre-temps) psutil renvoie 0.0.
+            # Intervalle autonome de 100 ms pour une mesure reelle
+            # (correction initiale 52256c1, perdue avec 58ab382).
+            "cpu_pct": round(float(psutil.cpu_percent(interval=0.1)), 1),
             "ram_pct": round(float(psutil.virtual_memory().percent), 1),
             "disk_pct": round(float(psutil.disk_usage("/").percent), 1),
         }
