@@ -23,7 +23,8 @@
 #
 #   module...          parmi : llm memory goal voice gateways doctor (défaut : tous)
 #
-# Variables : NERON_GIT_BASE (défaut git@github.com:enabeteleazar), PYTHON (défaut python3).
+# Variables : NERON_GIT_BASE (défaut git@github.com:enabeteleazar ; un dossier
+#             contenant des clones locaux est aussi accepté), PYTHON (défaut python3).
 #
 # Exemples :
 #   Homebox :   sudo -u neron /etc/neronOS/system/scripts/setup-modules.sh --venv /etc/neronOS/venv
@@ -116,10 +117,15 @@ setup_module() {
   elif [ -e "$target" ]; then
     info "$module" "ignoré : $target existe et n'est pas un clone git (rien n'est écrasé)"; RC=1
   else
-    if git clone --quiet --branch "$BRANCH" "$GIT_BASE/$repo.git" "$target"; then
-      info "$module" "cloné ($(git -C "$target" log -1 --format=%h))"
+    # Source : dépôt distant ($GIT_BASE/<repo>.git) ou, si NERON_GIT_BASE est un
+    # dossier, clone local ($GIT_BASE/<repo>) — utile pour un utilisateur de
+    # service sans clé GitHub (cf. system/deploy/install-homebox.sh).
+    local url="$GIT_BASE/$repo.git"
+    [ -d "$GIT_BASE/$repo/.git" ] && url="$GIT_BASE/$repo"
+    if git clone --quiet --branch "$BRANCH" "$url" "$target"; then
+      info "$module" "cloné depuis $url ($(git -C "$target" log -1 --format=%h))"
     else
-      info "$module" "échec du clone de $GIT_BASE/$repo.git (accès, réseau ou branche $BRANCH ?)"; RC=1
+      info "$module" "échec du clone de $url (accès, réseau ou branche $BRANCH ?)"; RC=1
     fi
   fi
 }
@@ -139,10 +145,13 @@ if [ "$SETUP_VENV" -eq 1 ] && [ "$CHECK" -eq 0 ]; then
   echo
   echo "Environnement Python : $VENV"
   [ -x "$VENV/bin/python" ] || "$PYTHON" -m venv "$VENV"
+  # /tmp est souvent un tmpfs à quota par utilisateur, trop petit pour les
+  # roues de torch : pip y échoue en « Disk quota exceeded ».
+  mkdir -p "$ROOT/runtime/tmp"
+  export TMPDIR="${NERON_PIP_TMPDIR:-$ROOT/runtime/tmp}"
   "$VENV/bin/python" -m pip install --quiet --upgrade pip
   "$VENV/bin/python" -m pip install --quiet --prefer-binary \
     -r "$ROOT/system/requirements/requirements.txt" \
-    -r "$ROOT/system/requirements/memory.txt" \
     --constraint "$ROOT/system/requirements/constraints.txt"
   echo "  dépendances installées"
 fi

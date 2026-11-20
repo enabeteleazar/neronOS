@@ -1,4 +1,9 @@
 # Optional semantic memory / Obsidian vector search dependencies.
+#
+# NON INSTALLÉ par défaut (setup-modules.sh) : aucun code n'importe
+# sentence-transformers à ce jour (vérifié le 20/11/2026). numpy aligné sur
+# core.txt : l'ancien pin 2.2.0 rendait l'installation conjointe impossible
+# (ResolutionImpossible) et n'a pas de paquet pour Python 3.14.
 
-numpy==2.2.0
+numpy==2.5.3
 sentence-transformers

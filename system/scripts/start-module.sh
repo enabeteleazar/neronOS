@@ -28,6 +28,8 @@ if [ -n "${NERON_VENV:-}" ]; then VENV="$NERON_VENV"
 elif [ -x "$ROOT/.venv/bin/python" ]; then VENV="$ROOT/.venv"
 else VENV="$ROOT/venv"
 fi
+# Chemin absolu : le script change de dossier avant de lancer Python.
+[ -d "$VENV" ] && VENV="$(cd "$VENV" && pwd)"
 PY="$VENV/bin/python"
 if [ ! -x "$PY" ]; then
   echo "environnement Python introuvable : $VENV" >&2
