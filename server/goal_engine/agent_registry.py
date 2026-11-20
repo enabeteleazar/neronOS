@@ -78,6 +78,20 @@ class AgentRegistry:
         registry = getattr(source, "registry", source)
         records = registry.list_agent_records()
         cards = [self.card_from_runtime_record(record) for record in records]
+        # Un agent désactivé (agents/factory/agent_state.py) n'est plus
+        # sélectionnable. Auparavant, chaque rechargement remettait tous les
+        # agents en « available » et annulait toute désactivation.
+        generated_dir = getattr(registry, "generated_dir", None)
+        if generated_dir is not None:
+            from agents.factory.agent_state import disabled_agents
+
+            disabled = disabled_agents(generated_dir)
+            cards = [
+                card.model_copy(update={"status": "unavailable"})
+                if card.agent_id in disabled
+                else card
+                for card in cards
+            ]
         for card in cards:
             self.register(card)
         return cards
