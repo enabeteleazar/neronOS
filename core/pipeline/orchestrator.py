@@ -141,6 +141,7 @@ class CoreOrchestrator:
         memory_result = detect_memory_intent(routing_query)
         knowledge_result = detect_knowledge_intent(routing_query)
         gateway_domain = _detect_gateway_domain(routing_query)
+        pc_remote_match = _detect_pc_remote_action(routing_query)
         agent_invocation = _parse_agent_invocation(query)
 
         if normalized == "/help":
@@ -297,6 +298,21 @@ class CoreOrchestrator:
                 complexity="complex",
                 requires_resolver=True,
                 requires_governor=True,
+            )
+        elif pc_remote_match:
+            # Même motif que gateway_domain juste au-dessus : le classifieur
+            # confond ces phrases avec system_status (« ouvre »/« ferme »/« pc »
+            # pris pour restart_service/backup). Sans priorité ici, elles sont
+            # captées par status_provider avant d'atteindre _TOOL_INTENTS.
+            # Constaté le 27/09/2026 : « ouvre htop sur mon pc distant » ->
+            # system_status. Rétabli : 48ba388, perdu avec 58ab382.
+            intent_result.intent = Intent.PC_REMOTE
+            decision = OrchestratorDecision(
+                intent=Intent.PC_REMOTE.value,
+                selected_route="tool_router",
+                reason="Commande de contrôle PC distant (pc_remote) détectée de façon déterministe.",
+                complexity="simple",
+                requires_tool=True,
             )
         elif (
             status_result.get("matched") or intent == Intent.SYSTEM_STATUS
@@ -1354,6 +1370,7 @@ _TOOL_INTENTS = {
     Intent.AGENT_RUN,
     Intent.PROJECT_STATUS,
     Intent.PROJECT_LIST,
+    Intent.PC_REMOTE,
 }
 
 
@@ -1755,6 +1772,47 @@ def _detect_gateway_domain(query: str) -> str | None:
     return None
 
 
+_PC_REMOTE_ACTION_MARKERS = {
+    "ouvre", "ouvrir", "lance", "lancer", "demarre", "demarrer",
+    "ferme", "fermer", "arrete", "arreter", "stoppe", "stopper",
+    "tue", "tuer", "liste", "lister", "affiche", "afficher",
+    "montre", "montrer",
+}
+
+_PC_REMOTE_EXPLICIT_PHRASES = (
+    "pc distant", "ordinateur distant", "commande mon pc",
+    "sur mon pc", "sur le serveur",
+)
+
+
+def _detect_pc_remote_action(query: str) -> bool:
+    """Commande de contrôle PC distant (tool pc_remote), détectée de façon
+    déterministe : un verbe d'action ET (une formule explicite OU le nom/id
+    d'un PC déclaré dans neron.yaml, pc_remote.devices).
+
+    Le PC est piloté en HTTP via son agent neronRemote : compatible avec un
+    Core et un PC sur des machines distinctes. Registre illisible ou
+    pc_remote désactivé : pas de détection, jamais d'exception.
+    """
+    if not (set(query.split()) & _PC_REMOTE_ACTION_MARKERS):
+        return False
+
+    if any(phrase in query for phrase in _PC_REMOTE_EXPLICIT_PHRASES):
+        return True
+
+    try:
+        from integrations.pc_remote.config import load_devices
+
+        devices = load_devices().values()
+    except Exception:
+        return False
+
+    for device in devices:
+        if device.id.replace("_", " ") in query or _normalize(device.name) in query:
+            return True
+    return False
+
+
 def _requires_goal_pipeline(query: str) -> bool:
     return any(
         token in query
@@ -1851,6 +1909,7 @@ def _executor_for_intent(intent: Intent) -> str:
     return {
         Intent.WEB_SEARCH: "web_agent",
         Intent.HA_ACTION: "ha_agent",
+        Intent.PC_REMOTE: "pc_remote_agent",
         Intent.CODE: "code_agent",
         Intent.CODE_AUDIT: "code_audit_agent",
         Intent.SYSTEM_STATUS: "system_agent",
